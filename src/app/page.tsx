@@ -134,7 +134,7 @@ export default function Home() {
           publication date, characters, and key events.
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Images are sent to an AI API for analysis. Do not upload sensitive images.
+          Images are sent to the Google Gemini API for analysis. Do not upload sensitive images.
         </p>
       </section>
 

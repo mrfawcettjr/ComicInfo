@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { GoogleGenerativeAI, SchemaType, type ObjectSchema } from "@google/generative-ai";
 import sharp from "sharp";
 
 import { comicInfoSchema } from "@/lib/comic-schema";
@@ -7,7 +7,8 @@ import { extractJsonFromModelOutput } from "@/lib/extract-model-json";
 export const runtime = "nodejs";
 
 const MAX_IMAGES = 4;
-const MAX_FILE_BYTES = 15 * 1024 * 1024;
+/** Keep uploads small enough for Vercel serverless request body limits (~4.5MB total). */
+const MAX_FILE_BYTES = 1024 * 1024;
 const ACCEPTED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/jpg",
@@ -16,6 +17,10 @@ const ACCEPTED_MIME_TYPES = new Set([
   "image/heic",
   "image/heif",
 ]);
+
+function geminiApiKey() {
+  return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+}
 
 function isSupportedMimeType(type: string) {
   return ACCEPTED_MIME_TYPES.has(type.toLowerCase());
@@ -32,6 +37,34 @@ function buildPrompt() {
     "Keep keyCharacters and keyEvents concise and factual.",
   ].join(" ");
 }
+
+const comicResponseSchema: ObjectSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    title: { type: SchemaType.STRING, nullable: true },
+    issueNumber: { type: SchemaType.STRING, nullable: true },
+    year: { type: SchemaType.INTEGER, nullable: true },
+    month: { type: SchemaType.STRING, nullable: true },
+    keyCharacters: {
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING },
+    },
+    keyEvents: {
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING },
+    },
+    confidenceNotes: { type: SchemaType.STRING, nullable: true },
+  },
+  required: [
+    "title",
+    "issueNumber",
+    "year",
+    "month",
+    "keyCharacters",
+    "keyEvents",
+    "confidenceNotes",
+  ],
+};
 
 async function normalizeImage(file: File) {
   const arrayBuffer = await file.arrayBuffer();
@@ -63,9 +96,13 @@ async function normalizeImage(file: File) {
 }
 
 export async function POST(request: Request) {
-  if (!process.env.OPENAI_API_KEY) {
+  const apiKey = geminiApiKey();
+  if (!apiKey) {
     return Response.json(
-      { error: "OPENAI_API_KEY is not configured on the server." },
+      {
+        error:
+          "GEMINI_API_KEY is not configured on the server. Set GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY).",
+      },
       { status: 500 },
     );
   }
@@ -100,7 +137,7 @@ export async function POST(request: Request) {
       if (file.size > MAX_FILE_BYTES) {
         return Response.json(
           {
-            error: `File is too large: ${file.name}. Max size is ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB.`,
+            error: `File is too large: ${file.name}. Max size is ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))}MB per file (Vercel request limit).`,
           },
           { status: 400 },
         );
@@ -109,91 +146,38 @@ export async function POST(request: Request) {
 
     const normalizedImages = await Promise.all(files.map((file) => normalizeImage(file)));
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const model = process.env.OPENAI_MODEL ?? "gpt-4.1";
-
-    const content: Array<
-      { type: "input_text"; text: string } | { type: "input_image"; image_url: string; detail: "auto" }
-    > = [
-      { type: "input_text", text: buildPrompt() },
-      ...normalizedImages.map((image) => ({
-        type: "input_image" as const,
-        image_url: `data:${image.mimeType};base64,${image.base64}`,
-        detail: "auto" as const,
-      })),
-    ];
-
-    const response = await client.responses.create({
-      model,
-      input: [
-        {
-          role: "user",
-          content,
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "comic_info",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              title: { type: ["string", "null"] },
-              issueNumber: { type: ["string", "null"] },
-              year: { type: ["number", "null"] },
-              month: { type: ["string", "null"] },
-              keyCharacters: {
-                type: "array",
-                items: { type: "string" },
-              },
-              keyEvents: {
-                type: "array",
-                items: { type: "string" },
-              },
-              confidenceNotes: { type: ["string", "null"] },
-            },
-            required: [
-              "title",
-              "issueNumber",
-              "year",
-              "month",
-              "keyCharacters",
-              "keyEvents",
-              "confidenceNotes",
-            ],
-          },
-          strict: true,
-        },
+    const modelName = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: comicResponseSchema,
       },
     });
 
-    if (response.error) {
-      return Response.json(
-        {
-          error: "The model returned an error.",
-          details: JSON.stringify(response.error),
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+      { text: buildPrompt() },
+      ...normalizedImages.map((image) => ({
+        inlineData: {
+          mimeType: image.mimeType,
+          data: image.base64,
         },
-        { status: 502 },
-      );
-    }
+      })),
+    ];
 
-    if (response.status && response.status !== "completed") {
-      return Response.json(
-        {
-          error: "The model response was not completed.",
-          details: response.incomplete_details
-            ? JSON.stringify(response.incomplete_details)
-            : response.status,
-        },
-        { status: 502 },
-      );
-    }
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts }],
+    });
 
-    const rawOutput = response.output_text?.trim() ?? "";
+    const rawOutput = result.response.text()?.trim() ?? "";
     if (!rawOutput) {
+      const block = result.response.promptFeedback?.blockReason;
       return Response.json(
-        { error: "Empty model output.", details: "No text returned from the model." },
+        {
+          error: "Empty model output.",
+          details: block ? `Blocked: ${block}` : "No text returned from the model.",
+        },
         { status: 502 },
       );
     }
