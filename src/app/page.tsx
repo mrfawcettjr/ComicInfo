@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ComicInfo } from "@/lib/comic-schema";
+import { compressImageForUpload } from "@/lib/compress-image";
 
 const MAX_IMAGES = 4;
 
@@ -58,6 +59,7 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("Analyzing…");
   const [result, setResult] = useState<ComicInfo | null>(null);
   const [rawJson, setRawJson] = useState<string>("");
 
@@ -97,15 +99,22 @@ export default function Home() {
     }
 
     setLoading(true);
+    setLoadingMessage("Compressing images…");
     setError(null);
     setResult(null);
     setRawJson("");
 
     try {
+      const compressedFiles = await Promise.all(
+        files.map((file) => compressImageForUpload(file)),
+      );
+
       const formData = new FormData();
-      for (const file of files) {
+      for (const file of compressedFiles) {
         formData.append("images", file);
       }
+
+      setLoadingMessage("Uploading and analyzing…");
 
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -140,6 +149,7 @@ export default function Home() {
       setError(analyzeError instanceof Error ? analyzeError.message : "Analysis failed.");
     } finally {
       setLoading(false);
+      setLoadingMessage("Analyzing…");
     }
   }
 
@@ -153,10 +163,11 @@ export default function Home() {
           visible condition.
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Google Lens is not available as a public API. This app uses{" "}
-          <span className="font-medium">Google Gemini</span> multimodal vision for Lens-like
-          image understanding. Photos are sent to Google for analysis. CGC estimates are
-          unofficial and for reference only. Do not upload sensitive images.
+          Images are compressed in your browser (target ≤ 1 MB each, ~0.8–1 MB when possible)
+          before upload to stay within hosting limits. Google Lens is not available as a public
+          API. This app uses <span className="font-medium">Google Gemini</span> multimodal vision
+          for Lens-like image understanding. Photos are sent to Google for analysis. CGC estimates
+          are unofficial and for reference only. Do not upload sensitive images.
         </p>
       </section>
 
@@ -237,7 +248,7 @@ export default function Home() {
           disabled={loading || files.length === 0}
           className="cursor-pointer rounded bg-zinc-900 px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
         >
-          {loading ? "Analyzing..." : "Analyze"}
+          {loading ? loadingMessage : "Analyze"}
         </button>
         {files.length > 0 && (
           <button

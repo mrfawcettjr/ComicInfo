@@ -56,7 +56,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 2. Click **Analyze**.
 3. Review extracted metadata, approximate grade, and raw JSON output.
 
-Uploads are limited to **1MB per image** so requests stay under typical Vercel serverless body limits when using several photos.
+The browser **compresses images client-side** (JPEG, target ≤ 1 MB, preferring ~0.8–1.0 MB when the photo has enough resolution) before upload so batches stay under typical Vercel serverless body limits. The server still enforces a **1 MB per file** maximum.
 
 ## API contract
 
