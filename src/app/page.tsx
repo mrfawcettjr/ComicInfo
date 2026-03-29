@@ -28,6 +28,26 @@ function prettyList(items: string[]) {
   );
 }
 
+/** Prefer API `details` when present; combine with `error` when both differ (e.g. generic summary + Gemini message). */
+function formatAnalyzeFailureMessage(
+  body: { error?: string; details?: string },
+  httpStatus: number,
+): string {
+  const summary = body.error?.trim();
+  const details = body.details?.trim();
+
+  if (details && summary && details !== summary) {
+    return `${summary}\n\n${details}`;
+  }
+  if (details) {
+    return details;
+  }
+  if (summary) {
+    return summary;
+  }
+  return `Analysis failed (HTTP ${httpStatus}).`;
+}
+
 function preventDragDefaults(event: React.DragEvent) {
   event.preventDefault();
   event.dataTransfer.dropEffect = "copy";
@@ -111,9 +131,7 @@ export default function Home() {
       };
 
       if (!response.ok || !body.data) {
-        throw new Error(
-          body.error ?? body.details ?? `Analysis failed (${response.status}).`,
-        );
+        throw new Error(formatAnalyzeFailureMessage(body, response.status));
       }
 
       setResult(body.data);
@@ -131,10 +149,14 @@ export default function Home() {
         <h1 className="text-3xl font-semibold tracking-tight">ComicInfo</h1>
         <p className="text-zinc-600 dark:text-zinc-300">
           Drag up to 4 comic photos from Photos or Finder, then analyze for title, issue,
-          publication date, characters, and key events.
+          publication date, characters, key events, and an approximate CGC-style grade from
+          visible condition.
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Images are sent to the Google Gemini API for analysis. Do not upload sensitive images.
+          Google Lens is not available as a public API. This app uses{" "}
+          <span className="font-medium">Google Gemini</span> multimodal vision for Lens-like
+          image understanding. Photos are sent to Google for analysis. CGC estimates are
+          unofficial and for reference only. Do not upload sensitive images.
         </p>
       </section>
 
@@ -234,7 +256,10 @@ export default function Home() {
       </div>
 
       {error && (
-        <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+        <div
+          className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700 break-words whitespace-pre-wrap dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+          role="alert"
+        >
           {error}
         </div>
       )}
@@ -255,6 +280,13 @@ export default function Home() {
             </p>
             <p>
               <span className="font-medium">Month:</span> {result.month ?? "Unknown"}
+            </p>
+            <p className="md:col-span-2">
+              <span className="font-medium">Approx. CGC grade (condition):</span>{" "}
+              {result.approximateCgcGrade ?? "Unknown"}{" "}
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                (unofficial estimate from photos, not a certified grade)
+              </span>
             </p>
           </div>
           <div>

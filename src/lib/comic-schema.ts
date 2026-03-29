@@ -16,6 +16,8 @@ export const comicInfoSchema = z.object({
   month: z.string().nullable(),
   keyCharacters: z.array(z.string()),
   keyEvents: z.array(z.string()),
+  /** Rough CGC-style estimate from visible condition only; not an official grade. */
+  approximateCgcGrade: z.string().nullable(),
   confidenceNotes: z.string().nullable().optional(),
 });
 

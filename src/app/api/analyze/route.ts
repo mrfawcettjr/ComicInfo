@@ -28,13 +28,18 @@ function isSupportedMimeType(type: string) {
 
 function buildPrompt() {
   return [
-    "You are extracting comic book metadata from up to four photos.",
-    "Use only details visible in the images. Do not guess.",
+    "You are performing Lens-style visual analysis on up to four comic book photos: read cover text, identify characters and scenes, and assess visible physical condition.",
+    "Use only details visible in the images. Do not invent facts.",
     "Return a JSON object with exactly these fields:",
-    "title (string or null), issueNumber (string or null), year (number or null), month (string or null), keyCharacters (string[]), keyEvents (string[]), confidenceNotes (string or null).",
+    "title (string or null), issueNumber (string or null), year (number or null), month (string or null),",
+    "keyCharacters (string[]), keyEvents (string[]), approximateCgcGrade (string or null), confidenceNotes (string or null).",
+    "For keyEvents, describe notable plot or cover moments visible in the images only.",
     "If data is not visible or uncertain, set it to null for scalar fields and [] for arrays.",
     "For month, use a full month name such as January, February, ... when available.",
-    "Keep keyCharacters and keyEvents concise and factual.",
+    "approximateCgcGrade: estimate a CGC-like numeric grade on the 0.5-10.0 scale from visible wear only (corners, spine, creases, color breaks, tears, stains, missing chunks).",
+    "Use a single number like 9.2 or a short range like 7.5-8.0 if uncertain. Set null if the book edges or condition cannot be judged from the photos.",
+    "In confidenceNotes, briefly state limitations (e.g. glare, crop) and that this is not an official CGC grade.",
+    "Keep keyCharacters and keyEvents concise.",
   ].join(" ");
 }
 
@@ -53,6 +58,7 @@ const comicResponseSchema: ObjectSchema = {
       type: SchemaType.ARRAY,
       items: { type: SchemaType.STRING },
     },
+    approximateCgcGrade: { type: SchemaType.STRING, nullable: true },
     confidenceNotes: { type: SchemaType.STRING, nullable: true },
   },
   required: [
@@ -62,6 +68,7 @@ const comicResponseSchema: ObjectSchema = {
     "month",
     "keyCharacters",
     "keyEvents",
+    "approximateCgcGrade",
     "confidenceNotes",
   ],
 };
