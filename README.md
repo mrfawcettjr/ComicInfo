@@ -39,7 +39,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 3. Set your API key in `.env.local`:
 
    - `GEMINI_API_KEY` is required ([Google AI Studio](https://aistudio.google.com/apikey)).
-   - `GEMINI_MODEL` is optional (default is `gemini-2.0-flash`).
+   - `GEMINI_MODEL` is optional (default is `gemini-2.5-flash`).
    - You may use `GOOGLE_GENERATIVE_AI_API_KEY` instead of `GEMINI_API_KEY` if you prefer.
 
 4. Start dev server:
