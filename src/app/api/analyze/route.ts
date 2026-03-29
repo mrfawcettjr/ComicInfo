@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import sharp from "sharp";
 
 import { comicInfoSchema } from "@/lib/comic-schema";
+import { extractJsonFromModelOutput } from "@/lib/extract-model-json";
 
 export const runtime = "nodejs";
 
@@ -33,33 +34,32 @@ function buildPrompt() {
 }
 
 async function normalizeImage(file: File) {
-  const mimeType = file.type || "application/octet-stream";
   const arrayBuffer = await file.arrayBuffer();
   const originalBuffer = Buffer.from(arrayBuffer);
 
-  if (
-    mimeType === "image/heic" ||
-    mimeType === "image/heif" ||
-    file.name.toLowerCase().endsWith(".heic") ||
-    file.name.toLowerCase().endsWith(".heif")
-  ) {
-    try {
-      const converted = await sharp(originalBuffer)
-        .jpeg({ quality: 90, mozjpeg: true })
-        .toBuffer();
-      return {
-        base64: converted.toString("base64"),
-        mimeType: "image/jpeg",
-      };
-    } catch {
-      // If conversion fails due to missing HEIF support, fall back to the original.
-    }
-  }
+  try {
+    const converted = await sharp(originalBuffer)
+      .rotate()
+      .resize({
+        width: 2048,
+        height: 2048,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 85, mozjpeg: true })
+      .toBuffer();
 
-  return {
-    base64: originalBuffer.toString("base64"),
-    mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg",
-  };
+    return {
+      base64: converted.toString("base64"),
+      mimeType: "image/jpeg",
+    };
+  } catch {
+    const mimeType = file.type || "application/octet-stream";
+    return {
+      base64: originalBuffer.toString("base64"),
+      mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg",
+    };
+  }
 }
 
 export async function POST(request: Request) {
@@ -168,8 +168,50 @@ export async function POST(request: Request) {
       },
     });
 
-    const rawOutput = response.output_text;
-    const parsed = comicInfoSchema.parse(JSON.parse(rawOutput));
+    if (response.error) {
+      return Response.json(
+        {
+          error: "The model returned an error.",
+          details: JSON.stringify(response.error),
+        },
+        { status: 502 },
+      );
+    }
+
+    if (response.status && response.status !== "completed") {
+      return Response.json(
+        {
+          error: "The model response was not completed.",
+          details: response.incomplete_details
+            ? JSON.stringify(response.incomplete_details)
+            : response.status,
+        },
+        { status: 502 },
+      );
+    }
+
+    const rawOutput = response.output_text?.trim() ?? "";
+    if (!rawOutput) {
+      return Response.json(
+        { error: "Empty model output.", details: "No text returned from the model." },
+        { status: 502 },
+      );
+    }
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(extractJsonFromModelOutput(rawOutput));
+    } catch (parseError) {
+      return Response.json(
+        {
+          error: "Could not parse model JSON.",
+          details: parseError instanceof Error ? parseError.message : String(parseError),
+        },
+        { status: 502 },
+      );
+    }
+
+    const parsed = comicInfoSchema.parse(parsedJson);
 
     return Response.json({ data: parsed });
   } catch (error) {

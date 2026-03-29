@@ -1,10 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ComicInfo } from "@/lib/comic-schema";
 
 const MAX_IMAGES = 4;
+
+function isImageFile(file: File) {
+  if (file.type.startsWith("image/")) {
+    return true;
+  }
+  const lower = file.name.toLowerCase();
+  return /\.(jpe?g|png|gif|webp|heic|heif|bmp|tif|tiff)$/.test(lower);
+}
 
 function prettyList(items: string[]) {
   if (items.length === 0) {
@@ -13,14 +21,20 @@ function prettyList(items: string[]) {
 
   return (
     <ul className="list-disc space-y-1 pl-5">
-      {items.map((item) => (
-        <li key={item}>{item}</li>
+      {items.map((item, index) => (
+        <li key={`${item}-${index}`}>{item}</li>
       ))}
     </ul>
   );
 }
 
+function preventDragDefaults(event: React.DragEvent) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+}
+
 export default function Home() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -28,12 +42,18 @@ export default function Home() {
   const [rawJson, setRawJson] = useState<string>("");
 
   const previews = useMemo(
-    () => files.map((file) => ({ name: file.name, url: URL.createObjectURL(file) })),
+    () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
     [files],
   );
 
+  useEffect(() => {
+    return () => {
+      previews.forEach((preview) => URL.revokeObjectURL(preview.url));
+    };
+  }, [previews]);
+
   function mergeFiles(incoming: File[]) {
-    const imageFiles = incoming.filter((file) => file.type.startsWith("image/"));
+    const imageFiles = incoming.filter((file) => isImageFile(file));
     if (imageFiles.length === 0) {
       setError("Please drop image files only.");
       return;
@@ -72,18 +92,32 @@ export default function Home() {
         body: formData,
       });
 
-      const payload = (await response.json()) as {
+      const text = await response.text();
+      let payload: unknown;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(
+          response.ok
+            ? "The server returned a response that was not valid JSON."
+            : `Request failed (${response.status}). The server response was not valid JSON.`,
+        );
+      }
+
+      const body = payload as {
         data?: ComicInfo;
         error?: string;
         details?: string;
       };
 
-      if (!response.ok || !payload.data) {
-        throw new Error(payload.error ?? payload.details ?? "Analysis failed.");
+      if (!response.ok || !body.data) {
+        throw new Error(
+          body.error ?? body.details ?? `Analysis failed (${response.status}).`,
+        );
       }
 
-      setResult(payload.data);
-      setRawJson(JSON.stringify(payload.data, null, 2));
+      setResult(body.data);
+      setRawJson(JSON.stringify(body.data, null, 2));
     } catch (analyzeError) {
       setError(analyzeError instanceof Error ? analyzeError.message : "Analysis failed.");
     } finally {
@@ -105,58 +139,74 @@ export default function Home() {
       </section>
 
       <section
-        className="rounded-xl border-2 border-dashed border-zinc-300 p-6 transition hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500"
-        onDragOver={(event) => {
-          event.preventDefault();
-        }}
+        className="flex min-h-[220px] flex-col gap-4 rounded-xl border-2 border-dashed border-zinc-300 p-6 transition hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500"
+        onDragEnter={preventDragDefaults}
+        onDragOver={preventDragDefaults}
         onDrop={(event) => {
           event.preventDefault();
           mergeFiles(Array.from(event.dataTransfer.files));
         }}
       >
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm">
-            Drop images here or use the picker. Supported: JPG, PNG, WEBP, HEIC.
+            Drop images anywhere in this box, or choose files. Supported: JPG, PNG, WEBP, HEIC.
           </p>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={(event) => {
-              const selected = event.target.files ? Array.from(event.target.files) : [];
-              mergeFiles(selected);
-              event.target.value = "";
-            }}
-          />
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                const selected = event.target.files ? Array.from(event.target.files) : [];
+                mergeFiles(selected);
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="cursor-pointer rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Choose files
+            </button>
+          </div>
         </div>
-      </section>
 
-      {previews.length > 0 && (
-        <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {previews.map((preview, index) => (
-            <div key={`${preview.name}-${index}`} className="space-y-2 rounded border p-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={preview.url}
-                alt={preview.name}
-                className="h-32 w-full rounded object-cover"
-              />
-              <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-xs">{preview.name}</p>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded bg-zinc-200 px-2 py-1 text-xs hover:bg-zinc-300 dark:bg-zinc-700 dark:hover:bg-zinc-600"
-                  onClick={() => {
-                    setFiles((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
-                  }}
-                >
-                  Remove
-                </button>
+        {previews.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {previews.map((preview, index) => (
+              <div
+                key={`${preview.file.name}-${preview.file.size}-${index}`}
+                className="space-y-2 rounded border p-2"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={preview.url}
+                  alt={preview.file.name}
+                  className="h-32 w-full rounded object-cover"
+                  draggable={false}
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate text-xs">{preview.file.name}</p>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded bg-zinc-200 px-2 py-1 text-xs hover:bg-zinc-300 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+                    onClick={() => {
+                      setFiles((previous) =>
+                        previous.filter((_, itemIndex) => itemIndex !== index),
+                      );
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </section>
-      )}
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="flex items-center gap-3">
         <button
@@ -197,7 +247,8 @@ export default function Home() {
               <span className="font-medium">Title:</span> {result.title ?? "Unknown"}
             </p>
             <p>
-              <span className="font-medium">Issue Number:</span> {result.issueNumber ?? "Unknown"}
+              <span className="font-medium">Issue Number:</span>{" "}
+              {result.issueNumber ?? "Unknown"}
             </p>
             <p>
               <span className="font-medium">Year:</span> {result.year ?? "Unknown"}
