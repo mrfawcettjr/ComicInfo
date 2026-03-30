@@ -2,10 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ComicInfo } from "@/lib/comic-schema";
+import type { ComicIdentification } from "@/lib/comic-schema";
 import { compressImageForUpload } from "@/lib/compress-image";
 
 const MAX_IMAGES = 4;
+
+type SearchHit = {
+  title: string;
+  link: string;
+  snippet: string;
+  displayLink: string;
+};
 
 function isImageFile(file: File) {
   if (file.type.startsWith("image/")) {
@@ -15,21 +22,6 @@ function isImageFile(file: File) {
   return /\.(jpe?g|png|gif|webp|heic|heif|bmp|tif|tiff)$/.test(lower);
 }
 
-function prettyList(items: string[]) {
-  if (items.length === 0) {
-    return <p className="text-sm text-zinc-500">None detected.</p>;
-  }
-
-  return (
-    <ul className="list-disc space-y-1 pl-5">
-      {items.map((item, index) => (
-        <li key={`${item}-${index}`}>{item}</li>
-      ))}
-    </ul>
-  );
-}
-
-/** Prefer API `details` when present; combine with `error` when both differ (e.g. generic summary + Gemini message). */
 function formatAnalyzeFailureMessage(
   body: { error?: string; details?: string },
   httpStatus: number,
@@ -54,14 +46,25 @@ function preventDragDefaults(event: React.DragEvent) {
   event.dataTransfer.dropEffect = "copy";
 }
 
+function displayValue(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  return String(value);
+}
+
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("Analyzing…");
-  const [result, setResult] = useState<ComicInfo | null>(null);
-  const [rawJson, setRawJson] = useState<string>("");
+  const [result, setResult] = useState<ComicIdentification | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookupQuery, setLookupQuery] = useState<string | null>(null);
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
 
   const previews = useMemo(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -92,6 +95,13 @@ export default function Home() {
     });
   }
 
+  function resetLookupState() {
+    setConfirmed(false);
+    setLookupError(null);
+    setLookupQuery(null);
+    setSearchHits([]);
+  }
+
   async function analyze() {
     if (files.length === 0) {
       setError("Please add at least one image.");
@@ -102,7 +112,7 @@ export default function Home() {
     setLoadingMessage("Compressing images…");
     setError(null);
     setResult(null);
-    setRawJson("");
+    resetLookupState();
 
     try {
       const compressedFiles = await Promise.all(
@@ -134,7 +144,7 @@ export default function Home() {
       }
 
       const body = payload as {
-        data?: ComicInfo;
+        data?: ComicIdentification;
         error?: string;
         details?: string;
       };
@@ -144,7 +154,6 @@ export default function Home() {
       }
 
       setResult(body.data);
-      setRawJson(JSON.stringify(body.data, null, 2));
     } catch (analyzeError) {
       setError(analyzeError instanceof Error ? analyzeError.message : "Analysis failed.");
     } finally {
@@ -153,21 +162,79 @@ export default function Home() {
     }
   }
 
+  async function confirmAndLookup() {
+    if (!result) {
+      return;
+    }
+
+    setLookupLoading(true);
+    setLookupError(null);
+    setSearchHits([]);
+    setLookupQuery(null);
+
+    try {
+      const response = await fetch("/api/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: result.title,
+          issueNumber: result.issueNumber,
+          year: result.year,
+          month: result.month,
+          volumeOrSeries: result.volumeOrSeries,
+        }),
+      });
+
+      const text = await response.text();
+      let payload: unknown;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(
+          response.ok
+            ? "Invalid response from lookup service."
+            : `Lookup failed (${response.status}).`,
+        );
+      }
+
+      const body = payload as {
+        query?: string;
+        items?: SearchHit[];
+        error?: string;
+        details?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          body.details ?? body.error ?? `Lookup failed (${response.status}).`,
+        );
+      }
+
+      setConfirmed(true);
+      setLookupQuery(body.query ?? null);
+      setSearchHits(Array.isArray(body.items) ? body.items : []);
+    } catch (lookupErr) {
+      setLookupError(
+        lookupErr instanceof Error ? lookupErr.message : "Lookup failed.",
+      );
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:px-8">
       <section className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">ComicInfo</h1>
         <p className="text-zinc-600 dark:text-zinc-300">
-          Drag up to 4 comic photos from Photos or Finder, then analyze for title, issue,
-          publication date, characters, key events, and an approximate CGC-style grade from
-          visible condition.
+          Upload photos of a comic cover. We identify the title, issue, publication month/year,
+          and series or volume when visible. Confirm the details, then search the web for
+          related results.
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Images are compressed in your browser (target ≤ 1 MB each, ~0.8–1 MB when possible)
-          before upload to stay within hosting limits. Google Lens is not available as a public
-          API. This app uses <span className="font-medium">Google Gemini</span> multimodal vision
-          for Lens-like image understanding. Photos are sent to Google for analysis. CGC estimates
-          are unofficial and for reference only. Do not upload sensitive images.
+          Images are compressed in your browser (≤ 1 MB each) before upload. Identification uses
+          Google Gemini. After confirmation, results use Google Programmable Search (not HTML
+          scraping). Do not upload sensitive images.
         </p>
       </section>
 
@@ -241,7 +308,7 @@ export default function Home() {
         )}
       </section>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={analyze}
@@ -257,8 +324,8 @@ export default function Home() {
             onClick={() => {
               setFiles([]);
               setResult(null);
-              setRawJson("");
               setError(null);
+              resetLookupState();
             }}
           >
             Clear
@@ -277,49 +344,91 @@ export default function Home() {
 
       {result && (
         <section className="space-y-4 rounded-xl border p-4">
-          <h2 className="text-xl font-semibold">Analysis Result</h2>
-          <div className="grid gap-2 md:grid-cols-2">
-            <p>
-              <span className="font-medium">Title:</span> {result.title ?? "Unknown"}
-            </p>
-            <p>
-              <span className="font-medium">Issue Number:</span>{" "}
-              {result.issueNumber ?? "Unknown"}
-            </p>
-            <p>
-              <span className="font-medium">Year:</span> {result.year ?? "Unknown"}
-            </p>
-            <p>
-              <span className="font-medium">Month:</span> {result.month ?? "Unknown"}
-            </p>
-            <p className="md:col-span-2">
-              <span className="font-medium">Approx. CGC grade (condition):</span>{" "}
-              {result.approximateCgcGrade ?? "Unknown"}{" "}
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                (unofficial estimate from photos, not a certified grade)
-              </span>
-            </p>
+          <h2 className="text-xl font-semibold">Identified comic</h2>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Review the fields below. If they look right, confirm to run a Google search.
+          </p>
+          <dl className="grid gap-3 text-sm md:grid-cols-2">
+            <div>
+              <dt className="font-medium text-zinc-950 dark:text-zinc-50">Name / title</dt>
+              <dd className="mt-1">{displayValue(result.title)}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-zinc-950 dark:text-zinc-50">Issue number</dt>
+              <dd className="mt-1">{displayValue(result.issueNumber)}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-zinc-950 dark:text-zinc-50">Year</dt>
+              <dd className="mt-1">{displayValue(result.year)}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-zinc-950 dark:text-zinc-50">Month</dt>
+              <dd className="mt-1">{displayValue(result.month)}</dd>
+            </div>
+            <div className="md:col-span-2">
+              <dt className="font-medium text-zinc-950 dark:text-zinc-50">
+                Volume / series
+              </dt>
+              <dd className="mt-1">{displayValue(result.volumeOrSeries)}</dd>
+            </div>
+          </dl>
+
+          <div className="flex flex-wrap gap-3 pt-2">
+            <button
+              type="button"
+              onClick={confirmAndLookup}
+              disabled={lookupLoading}
+              className="cursor-pointer rounded bg-emerald-700 px-4 py-2 text-sm text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+            >
+              {lookupLoading ? "Searching…" : "Yes, this is correct — search the web"}
+            </button>
           </div>
-          <div>
-            <h3 className="font-medium">Key Characters</h3>
-            {prettyList(result.keyCharacters)}
-          </div>
-          <div>
-            <h3 className="font-medium">Key Events</h3>
-            {prettyList(result.keyEvents)}
-          </div>
-          <div>
-            <h3 className="font-medium">Confidence Notes</h3>
-            <p className="text-sm text-zinc-600 dark:text-zinc-300">
-              {result.confidenceNotes ?? "No confidence notes provided."}
-            </p>
-          </div>
-          <div>
-            <h3 className="font-medium">Raw JSON</h3>
-            <pre className="overflow-x-auto rounded bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
-              {rawJson}
-            </pre>
-          </div>
+
+          {lookupError && (
+            <div
+              className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+              role="status"
+            >
+              {lookupError}
+            </div>
+          )}
+
+          {confirmed && !lookupError && lookupQuery !== null && (
+            <div className="space-y-3 border-t pt-4 dark:border-zinc-700">
+              <h3 className="text-lg font-semibold">Web results</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Query: <span className="font-mono text-zinc-700 dark:text-zinc-300">{lookupQuery}</span>
+              </p>
+              {searchHits.length === 0 ? (
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  No results returned. Try a different photo or edit the query in the app later.
+                </p>
+              ) : (
+                <ul className="space-y-4">
+                  {searchHits.map((hit) => (
+                    <li key={hit.link} className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
+                      <a
+                        href={hit.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block font-medium text-blue-700 hover:underline dark:text-blue-400"
+                      >
+                        {hit.title || hit.link}
+                      </a>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {hit.displayLink}
+                      </p>
+                      {hit.snippet && (
+                        <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+                          {hit.snippet}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </section>
       )}
     </main>

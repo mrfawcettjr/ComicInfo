@@ -1,26 +1,23 @@
 # ComicInfo
 
-ComicInfo is a Next.js web app that analyzes up to four comic book photos and returns:
+ComicInfo is a Next.js web app that analyzes up to four comic cover photos and returns:
 
-- Title
-- Issue number
-- Publication year and month
-- Key characters
-- Key events
-- **Approximate CGC-style grade** from visible condition (unofficial; not a certified grade)
+- Comic **title** (name)
+- **Issue number**
+- **Year** and **month** of publication (when visible)
+- **Volume or series** label (when visible)
+
+After you confirm the identification, the app runs a **Google Programmable Search** web search and displays result titles, links, and snippets.
 
 It is designed to run locally on a MacBook Pro and deploy to Vercel.
-
-## Google Lens and this app
-
-**Google Lens does not ship as a public HTTP API** for third-party apps. ComicInfo instead uses **[Google Gemini](https://ai.google.dev/)** multimodal models (`generateContent` with images) to perform **Lens-like visual analysis**: reading cover text, recognizing characters and scenes, and estimating wear for a rough CGC-style number.
 
 ## Stack
 
 - Next.js (App Router) + TypeScript
 - Tailwind CSS
-- Google Gemini API (multimodal vision) via server route (`/api/analyze`)
-- `sharp` for image normalization (including HEIC fallback conversion)
+- **Google Gemini** (multimodal vision) — `POST /api/analyze`
+- Optional **Comic Vine** — enriches `year` and `volumeOrSeries` when a matching issue is found
+- **Google Custom Search JSON API** — `POST /api/lookup` (after user confirmation; not HTML scraping)
 
 ## Local setup
 
@@ -36,12 +33,13 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
    cp .env.example .env.local
    ```
 
-3. Set your API key in `.env.local`:
+3. Set your keys in `.env.local`:
 
-   - `GEMINI_API_KEY` is required ([Google AI Studio](https://aistudio.google.com/apikey)).
-   - `GEMINI_MODEL` is optional (default is `gemini-2.5-flash`).
-   - You may use `GOOGLE_GENERATIVE_AI_API_KEY` instead of `GEMINI_API_KEY` if you prefer.
-   - `COMIC_VINE_API_KEY` is optional. If set, the app uses Comic Vine to backfill `year` when Gemini returns `year: null`.
+   - `GEMINI_API_KEY` — required ([Google AI Studio](https://aistudio.google.com/apikey)).
+   - `GEMINI_MODEL` — optional (default `gemini-2.5-flash`).
+   - `GOOGLE_GENERATIVE_AI_API_KEY` — optional alias for `GEMINI_API_KEY`.
+   - `COMIC_VINE_API_KEY` — optional; helps year / series when Gemini omits them.
+   - `GOOGLE_CUSTOM_SEARCH_API_KEY` and `GOOGLE_CUSTOM_SEARCH_ENGINE_ID` — required for the confirmation search. Create a [Programmable Search Engine](https://programmablesearchengine.google.com/) and enable the Custom Search JSON API in Google Cloud.
 
 4. Start dev server:
 
@@ -53,44 +51,34 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 
 ## Usage
 
-1. Drag and drop up to four comic photos from Photos or Finder, or use the file picker.
-2. Click **Analyze**.
-3. Review extracted metadata, approximate grade, and raw JSON output.
+1. Add up to four comic photos (client compresses to ≤ 1 MB each).
+2. Click **Analyze** to extract identification fields.
+3. Click **Yes, this is correct — search the web** to fetch Google search results for that metadata.
 
-The browser **compresses images client-side** (JPEG, target ≤ 1 MB, preferring ~0.8–1.0 MB when the photo has enough resolution) before upload so batches stay under typical Vercel serverless body limits. The server still enforces a **1 MB per file** maximum.
+## API
 
-## API contract
+### `POST /api/analyze`
 
-- Endpoint: `POST /api/analyze`
-- Body: `multipart/form-data` with `images` fields (1-4 image files)
-- Returns: JSON with `data` object:
-  - `title`
-  - `issueNumber`
-  - `year`
-  - `month`
-  - `keyCharacters`
-  - `keyEvents`
-  - `approximateCgcGrade` (string or null; unofficial estimate)
-  - `confidenceNotes`
+- Body: `multipart/form-data` with `images` (1–4 files).
+- Returns: `{ data: { title, issueNumber, year, month, volumeOrSeries } }`
 
-If `title` and `issueNumber` are available, the API attempts a Comic Vine issue match for enrichment. It uses Comic Vine metadata to source `keyCharacters`, and if Gemini returns `year: null`, it fills `year` from Comic Vine `cover_date`/`store_date` when a strong match is found.
+### `POST /api/lookup`
 
-For `keyEvents` (key plot points):
-- Marvel comics: sourced from `marvel.fandom.com` article extract summary.
-- Non-Marvel comics: sourced from Gemini visual analysis.
+- Body: JSON `{ title?, issueNumber?, year?, month?, volumeOrSeries? }`
+- Returns: `{ query, totalResults, items: [{ title, link, snippet, displayLink }] }`
 
 ## Deploy to Vercel
 
-1. Push this project to [https://github.com/mrfawcettjr/ComicInfo](https://github.com/mrfawcettjr/ComicInfo).
-2. In Vercel, click **Add New Project** and import the `ComicInfo` repo.
-3. Set environment variables in Vercel project settings:
+1. Push to [https://github.com/mrfawcettjr/ComicInfo](https://github.com/mrfawcettjr/ComicInfo).
+2. Import the repo in Vercel.
+3. Set environment variables in the Vercel project:
    - `GEMINI_API_KEY` (or `GOOGLE_GENERATIVE_AI_API_KEY`)
    - `GEMINI_MODEL` (optional)
-   - `COMIC_VINE_API_KEY` (optional fallback for publication year)
-4. Deploy. Vercel will build and publish on every push to `main`.
+   - `COMIC_VINE_API_KEY` (optional)
+   - `GOOGLE_CUSTOM_SEARCH_API_KEY` and `GOOGLE_CUSTOM_SEARCH_ENGINE_ID` (for search after confirmation)
 
 ## Notes
 
-- Uploaded images are sent to Google’s Gemini API for analysis.
-- **CGC-style grades are approximate** and based only on what is visible in your photos. They are not certified, replacement for professional grading, or investment advice.
-- Text and metadata may be incomplete when the cover is obscured, cropped, or low resolution.
+- Uploaded images are sent to Google’s Gemini API for identification.
+- **Web search** uses Google’s official Custom Search API — not scraping `google.com` HTML (which is unreliable and often blocked).
+- Comic Vine enrichment depends on title/issue matching; ambiguous titles may not match.

@@ -1,13 +1,12 @@
 import { GoogleGenerativeAI, SchemaType, type ObjectSchema } from "@google/generative-ai";
 import sharp from "sharp";
 
-import { comicInfoSchema } from "@/lib/comic-schema";
+import { comicIdentificationSchema } from "@/lib/comic-schema";
 import { extractJsonFromModelOutput } from "@/lib/extract-model-json";
 
 export const runtime = "nodejs";
 
 const MAX_IMAGES = 4;
-/** Keep uploads small enough for Vercel serverless request body limits (~4.5MB total). */
 const MAX_FILE_BYTES = 1024 * 1024;
 const ACCEPTED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -32,18 +31,15 @@ function isSupportedMimeType(type: string) {
 
 function buildPrompt() {
   return [
-    "You are performing Lens-style visual analysis on up to four comic book photos: read cover text, identify characters and scenes, and assess visible physical condition.",
-    "Use only details visible in the images. Do not invent facts.",
+    "You are reading comic book cover photos (up to four images). Extract only identifying metadata.",
+    "Use only details visible in the images. Do not guess.",
     "Return a JSON object with exactly these fields:",
-    "title (string or null), issueNumber (string or null), year (number or null), month (string or null),",
-    "keyCharacters (string[]), keyEvents (string[]), approximateCgcGrade (string or null), confidenceNotes (string or null).",
-    "For keyEvents, describe notable plot or cover moments visible in the images only.",
-    "If data is not visible or uncertain, set it to null for scalar fields and [] for arrays.",
-    "For month, use a full month name such as January, February, ... when available.",
-    "approximateCgcGrade: estimate a CGC-like numeric grade on the 0.5-10.0 scale from visible wear only (corners, spine, creases, color breaks, tears, stains, missing chunks).",
-    "Use a single number like 9.2 or a short range like 7.5-8.0 if uncertain. Set null if the book edges or condition cannot be judged from the photos.",
-    "In confidenceNotes, briefly state limitations (e.g. glare, crop) and that this is not an official CGC grade.",
-    "Keep keyCharacters and keyEvents concise.",
+    "title (string or null): comic or series name as shown on the cover.",
+    "issueNumber (string or null): issue number as printed.",
+    "year (number or null): publication year if visible (cover date, copyright, or indicia).",
+    "month (string or null): publication month if visible; use full month name (January, February, ...).",
+    "volumeOrSeries (string or null): volume number, series label, or series name if visible (e.g. 'Vol. 2', 'Amazing Spider-Man').",
+    "If something is not visible or uncertain, set it to null.",
   ].join(" ");
 }
 
@@ -54,27 +50,9 @@ const comicResponseSchema: ObjectSchema = {
     issueNumber: { type: SchemaType.STRING, nullable: true },
     year: { type: SchemaType.INTEGER, nullable: true },
     month: { type: SchemaType.STRING, nullable: true },
-    keyCharacters: {
-      type: SchemaType.ARRAY,
-      items: { type: SchemaType.STRING },
-    },
-    keyEvents: {
-      type: SchemaType.ARRAY,
-      items: { type: SchemaType.STRING },
-    },
-    approximateCgcGrade: { type: SchemaType.STRING, nullable: true },
-    confidenceNotes: { type: SchemaType.STRING, nullable: true },
+    volumeOrSeries: { type: SchemaType.STRING, nullable: true },
   },
-  required: [
-    "title",
-    "issueNumber",
-    "year",
-    "month",
-    "keyCharacters",
-    "keyEvents",
-    "approximateCgcGrade",
-    "confidenceNotes",
-  ],
+  required: ["title", "issueNumber", "year", "month", "volumeOrSeries"],
 };
 
 async function normalizeImage(file: File) {
@@ -111,14 +89,10 @@ type ComicVineIssue = {
   name?: string | null;
   cover_date?: string | null;
   store_date?: string | null;
-  character_credits?: Array<{ name?: string | null }> | null;
-  api_detail_url?: string | null;
-  publisher?: { name?: string | null } | null;
   volume?: { name?: string | null } | null;
 };
 
 type ComicVineSearchResponse = {
-  status_code?: number;
   results?: ComicVineIssue[];
 };
 
@@ -136,25 +110,6 @@ function extractYear(dateString?: string | null) {
   }
   const match = dateString.match(/\b(19|20)\d{2}\b/);
   return match ? Number.parseInt(match[0], 10) : null;
-}
-
-function stripHtml(value: string) {
-  return value
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function firstSentences(value: string, maxItems: number) {
-  const plain = stripHtml(value);
-  if (!plain) {
-    return [];
-  }
-  return plain
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 20)
-    .slice(0, maxItems);
 }
 
 function scoreComicVineIssue(
@@ -188,68 +143,15 @@ function scoreComicVineIssue(
   return score;
 }
 
-type ComicVineFallbackData = {
-  year: number | null;
-  keyCharacters: string[];
-  isMarvel: boolean;
-};
-
-type ComicVineIssueDetailResponse = {
-  status_code?: number;
-  results?: {
-    publisher?: { name?: string | null } | null;
-    volume?: {
-      publisher?: { name?: string | null } | null;
-    } | null;
-  } | null;
-};
-
-async function lookupComicVinePublisher(
-  apiDetailUrl: string,
-): Promise<string | null> {
-  const apiKey = comicVineApiKey();
-  if (!apiKey) {
-    return null;
-  }
-
-  const url = new URL(apiDetailUrl);
-  url.searchParams.set("api_key", apiKey);
-  url.searchParams.set("format", "json");
-  url.searchParams.set("field_list", "publisher,volume");
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      "User-Agent": "ComicInfo/1.0",
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    return null;
-  }
-
-  const payload = (await response.json()) as ComicVineIssueDetailResponse;
-  return (
-    payload.results?.publisher?.name ??
-    payload.results?.volume?.publisher?.name ??
-    null
-  );
-}
-
-function isMarvelPublisherName(name: string | null) {
-  return (name ?? "").toLowerCase().includes("marvel");
-}
-
-async function lookupIssueDataFromComicVine(
+async function enrichFromComicVine(
   title: string,
   issueNumber: string,
-): Promise<ComicVineFallbackData | null> {
+): Promise<{ year: number | null; volumeOrSeries: string | null } | null> {
   const apiKey = comicVineApiKey();
   if (!apiKey) {
     return null;
   }
 
-  const query = `${title} ${issueNumber}`;
   const url = new URL("https://comicvine.gamespot.com/api/search/");
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("format", "json");
@@ -257,9 +159,9 @@ async function lookupIssueDataFromComicVine(
   url.searchParams.set("limit", "10");
   url.searchParams.set(
     "field_list",
-    "issue_number,name,cover_date,store_date,character_credits,api_detail_url,publisher,volume",
+    "issue_number,name,cover_date,store_date,volume",
   );
-  url.searchParams.set("query", query);
+  url.searchParams.set("query", `${title} ${issueNumber}`);
 
   const response = await fetch(url.toString(), {
     headers: {
@@ -286,93 +188,9 @@ async function lookupIssueDataFromComicVine(
   );
   const best = sortedByMatch[0];
   const year = extractYear(best.cover_date) ?? extractYear(best.store_date);
+  const volumeOrSeries = best.volume?.name?.trim() ?? null;
 
-  const keyCharacters = (best.character_credits ?? [])
-    .map((entry) => (entry.name ?? "").trim())
-    .filter((name) => name.length > 0)
-    .slice(0, 10);
-
-  let publisherName = best.publisher?.name ?? null;
-  if (!publisherName && best.api_detail_url) {
-    publisherName = await lookupComicVinePublisher(best.api_detail_url);
-  }
-
-  return {
-    year,
-    keyCharacters,
-    isMarvel: isMarvelPublisherName(publisherName),
-  };
-}
-
-type FandomSearchResponse = {
-  query?: {
-    search?: Array<{ title?: string }>;
-  };
-};
-
-type FandomExtractResponse = {
-  query?: {
-    pages?: Record<
-      string,
-      {
-        extract?: string;
-      }
-    >;
-  };
-};
-
-async function fetchMarvelFandomKeyEvents(
-  title: string,
-  issueNumber: string,
-): Promise<string[]> {
-  const query = `${title} #${issueNumber}`;
-  const searchUrl = new URL("https://marvel.fandom.com/api.php");
-  searchUrl.searchParams.set("action", "query");
-  searchUrl.searchParams.set("list", "search");
-  searchUrl.searchParams.set("format", "json");
-  searchUrl.searchParams.set("srsearch", query);
-  searchUrl.searchParams.set("srlimit", "1");
-
-  const searchResponse = await fetch(searchUrl.toString(), {
-    headers: {
-      "User-Agent": "ComicInfo/1.0",
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-  if (!searchResponse.ok) {
-    return [];
-  }
-
-  const searchPayload = (await searchResponse.json()) as FandomSearchResponse;
-  const pageTitle = searchPayload.query?.search?.[0]?.title;
-  if (!pageTitle) {
-    return [];
-  }
-
-  const extractUrl = new URL("https://marvel.fandom.com/api.php");
-  extractUrl.searchParams.set("action", "query");
-  extractUrl.searchParams.set("prop", "extracts");
-  extractUrl.searchParams.set("exintro", "1");
-  extractUrl.searchParams.set("explaintext", "1");
-  extractUrl.searchParams.set("format", "json");
-  extractUrl.searchParams.set("titles", pageTitle);
-
-  const extractResponse = await fetch(extractUrl.toString(), {
-    headers: {
-      "User-Agent": "ComicInfo/1.0",
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-  if (!extractResponse.ok) {
-    return [];
-  }
-
-  const extractPayload = (await extractResponse.json()) as FandomExtractResponse;
-  const page = Object.values(extractPayload.query?.pages ?? {})[0];
-  const extract = page?.extract ?? "";
-  return firstSentences(extract, 5);
+  return { year, volumeOrSeries };
 }
 
 export async function POST(request: Request) {
@@ -475,45 +293,19 @@ export async function POST(request: Request) {
       );
     }
 
-    const parsed = comicInfoSchema.parse(parsedJson);
-    if (parsed.title && parsed.issueNumber) {
-      const fallbackData = await lookupIssueDataFromComicVine(
-        parsed.title,
-        parsed.issueNumber,
-      );
-      if (fallbackData) {
-        if (parsed.year === null && fallbackData.year !== null) {
-          parsed.year = fallbackData.year;
-        }
-        if (fallbackData.keyCharacters.length > 0) {
-          parsed.keyCharacters = fallbackData.keyCharacters;
-        }
-        if (fallbackData.isMarvel) {
-          const fandomEvents = await fetchMarvelFandomKeyEvents(
-            parsed.title,
-            parsed.issueNumber,
-          );
-          if (fandomEvents.length > 0) {
-            parsed.keyEvents = fandomEvents;
-          }
-        }
+    const parsed = comicIdentificationSchema.parse(parsedJson);
 
-        const notes: string[] = [];
-        if (fallbackData.year !== null) {
-          notes.push("Year from Comic Vine fallback.");
+    if (parsed.title && parsed.issueNumber) {
+      const enrich = await enrichFromComicVine(parsed.title, parsed.issueNumber);
+      if (enrich) {
+        if (parsed.year === null && enrich.year !== null) {
+          parsed.year = enrich.year;
         }
-        if (fallbackData.keyCharacters.length > 0) {
-          notes.push("Key characters sourced from Comic Vine.");
-        }
-        if (fallbackData.isMarvel && parsed.keyEvents.length > 0) {
-          notes.push("Key plot points sourced from Marvel Fandom.");
-        } else if (parsed.keyEvents.length > 0) {
-          notes.push("Key plot points from Gemini visual analysis.");
-        }
-        if (notes.length > 0) {
-          parsed.confidenceNotes = parsed.confidenceNotes
-            ? `${parsed.confidenceNotes} | ${notes.join(" ")}`
-            : notes.join(" ");
+        if (
+          (!parsed.volumeOrSeries || !parsed.volumeOrSeries.trim()) &&
+          enrich.volumeOrSeries
+        ) {
+          parsed.volumeOrSeries = enrich.volumeOrSeries;
         }
       }
     }

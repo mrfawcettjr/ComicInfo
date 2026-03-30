@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const comicInfoSchema = z.object({
+/** Identifying metadata extracted from cover images (and optional Comic Vine enrichment). */
+export const comicIdentificationSchema = z.object({
   title: z.string().nullable(),
   issueNumber: z.string().nullable(),
   year: z
@@ -14,11 +15,18 @@ export const comicInfoSchema = z.object({
       return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
     }),
   month: z.string().nullable(),
-  keyCharacters: z.array(z.string()),
-  keyEvents: z.array(z.string()),
-  /** Rough CGC-style estimate from visible condition only; not an official grade. */
-  approximateCgcGrade: z.string().nullable(),
-  confidenceNotes: z.string().nullable().optional(),
+  /** Series title, volume label, or "Vol. N" if visible on the cover or indicia. */
+  volumeOrSeries: z.string().nullable(),
 });
 
-export type ComicInfo = z.infer<typeof comicInfoSchema>;
+export type ComicIdentification = z.infer<typeof comicIdentificationSchema>;
+
+export const lookupRequestSchema = z.object({
+  title: z.string().nullable().optional(),
+  issueNumber: z.string().nullable().optional(),
+  year: z.union([z.number(), z.string()]).nullable().optional(),
+  month: z.string().nullable().optional(),
+  volumeOrSeries: z.string().nullable().optional(),
+});
+
+export type LookupRequest = z.infer<typeof lookupRequestSchema>;
