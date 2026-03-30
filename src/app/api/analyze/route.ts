@@ -111,10 +111,7 @@ type ComicVineIssue = {
   name?: string | null;
   cover_date?: string | null;
   store_date?: string | null;
-  deck?: string | null;
-  description?: string | null;
   character_credits?: Array<{ name?: string | null }> | null;
-  story_arc_credits?: Array<{ name?: string | null }> | null;
   volume?: { name?: string | null } | null;
 };
 
@@ -137,25 +134,6 @@ function extractYear(dateString?: string | null) {
   }
   const match = dateString.match(/\b(19|20)\d{2}\b/);
   return match ? Number.parseInt(match[0], 10) : null;
-}
-
-function stripHtml(value: string) {
-  return value
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function firstSentences(value: string, maxItems: number) {
-  const plain = stripHtml(value);
-  if (!plain) {
-    return [];
-  }
-  return plain
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 15)
-    .slice(0, maxItems);
 }
 
 function scoreComicVineIssue(
@@ -192,7 +170,6 @@ function scoreComicVineIssue(
 type ComicVineFallbackData = {
   year: number | null;
   keyCharacters: string[];
-  keyEvents: string[];
 };
 
 async function lookupIssueDataFromComicVine(
@@ -212,7 +189,7 @@ async function lookupIssueDataFromComicVine(
   url.searchParams.set("limit", "10");
   url.searchParams.set(
     "field_list",
-    "issue_number,name,cover_date,store_date,deck,description,character_credits,story_arc_credits,volume",
+    "issue_number,name,cover_date,store_date,character_credits,volume",
   );
   url.searchParams.set("query", query);
 
@@ -247,20 +224,7 @@ async function lookupIssueDataFromComicVine(
     .filter((name) => name.length > 0)
     .slice(0, 10);
 
-  const arcEvents = (best.story_arc_credits ?? [])
-    .map((entry) => (entry.name ?? "").trim())
-    .filter((name) => name.length > 0)
-    .slice(0, 4)
-    .map((name) => `Story arc: ${name}`);
-
-  const textEvents = [
-    ...firstSentences(best.deck ?? "", 2),
-    ...firstSentences(best.description ?? "", 3),
-  ];
-
-  const dedupedEvents = [...new Set([...arcEvents, ...textEvents])].slice(0, 6);
-
-  return { year, keyCharacters, keyEvents: dedupedEvents };
+  return { year, keyCharacters };
 }
 
 export async function POST(request: Request) {
@@ -376,16 +340,16 @@ export async function POST(request: Request) {
         if (fallbackData.keyCharacters.length > 0) {
           parsed.keyCharacters = fallbackData.keyCharacters;
         }
-        if (fallbackData.keyEvents.length > 0) {
-          parsed.keyEvents = fallbackData.keyEvents;
-        }
 
         const notes: string[] = [];
         if (fallbackData.year !== null) {
           notes.push("Year from Comic Vine fallback.");
         }
-        if (fallbackData.keyCharacters.length > 0 || fallbackData.keyEvents.length > 0) {
-          notes.push("Key characters/events sourced from Comic Vine.");
+        if (fallbackData.keyCharacters.length > 0) {
+          notes.push("Key characters sourced from Comic Vine.");
+        }
+        if (parsed.keyEvents.length > 0) {
+          notes.push("Key plot points from Gemini visual analysis.");
         }
         if (notes.length > 0) {
           parsed.confidenceNotes = parsed.confidenceNotes
