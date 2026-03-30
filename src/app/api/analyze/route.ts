@@ -111,6 +111,10 @@ type ComicVineIssue = {
   name?: string | null;
   cover_date?: string | null;
   store_date?: string | null;
+  deck?: string | null;
+  description?: string | null;
+  character_credits?: Array<{ name?: string | null }> | null;
+  story_arc_credits?: Array<{ name?: string | null }> | null;
   volume?: { name?: string | null } | null;
 };
 
@@ -133,6 +137,25 @@ function extractYear(dateString?: string | null) {
   }
   const match = dateString.match(/\b(19|20)\d{2}\b/);
   return match ? Number.parseInt(match[0], 10) : null;
+}
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firstSentences(value: string, maxItems: number) {
+  const plain = stripHtml(value);
+  if (!plain) {
+    return [];
+  }
+  return plain
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 15)
+    .slice(0, maxItems);
 }
 
 function scoreComicVineIssue(
@@ -166,10 +189,16 @@ function scoreComicVineIssue(
   return score;
 }
 
-async function lookupYearFromComicVine(
+type ComicVineFallbackData = {
+  year: number | null;
+  keyCharacters: string[];
+  keyEvents: string[];
+};
+
+async function lookupIssueDataFromComicVine(
   title: string,
   issueNumber: string,
-): Promise<number | null> {
+): Promise<ComicVineFallbackData | null> {
   const apiKey = comicVineApiKey();
   if (!apiKey) {
     return null;
@@ -183,7 +212,7 @@ async function lookupYearFromComicVine(
   url.searchParams.set("limit", "10");
   url.searchParams.set(
     "field_list",
-    "issue_number,name,cover_date,store_date,volume",
+    "issue_number,name,cover_date,store_date,deck,description,character_credits,story_arc_credits,volume",
   );
   url.searchParams.set("query", query);
 
@@ -211,7 +240,27 @@ async function lookupYearFromComicVine(
       scoreComicVineIssue(a, title, issueNumber),
   );
   const best = sortedByMatch[0];
-  return extractYear(best.cover_date) ?? extractYear(best.store_date);
+  const year = extractYear(best.cover_date) ?? extractYear(best.store_date);
+
+  const keyCharacters = (best.character_credits ?? [])
+    .map((entry) => (entry.name ?? "").trim())
+    .filter((name) => name.length > 0)
+    .slice(0, 10);
+
+  const arcEvents = (best.story_arc_credits ?? [])
+    .map((entry) => (entry.name ?? "").trim())
+    .filter((name) => name.length > 0)
+    .slice(0, 4)
+    .map((name) => `Story arc: ${name}`);
+
+  const textEvents = [
+    ...firstSentences(best.deck ?? "", 2),
+    ...firstSentences(best.description ?? "", 3),
+  ];
+
+  const dedupedEvents = [...new Set([...arcEvents, ...textEvents])].slice(0, 6);
+
+  return { year, keyCharacters, keyEvents: dedupedEvents };
 }
 
 export async function POST(request: Request) {
@@ -315,16 +364,34 @@ export async function POST(request: Request) {
     }
 
     const parsed = comicInfoSchema.parse(parsedJson);
-    if (parsed.year === null && parsed.title && parsed.issueNumber) {
-      const fallbackYear = await lookupYearFromComicVine(
+    if (parsed.title && parsed.issueNumber) {
+      const fallbackData = await lookupIssueDataFromComicVine(
         parsed.title,
         parsed.issueNumber,
       );
-      if (fallbackYear !== null) {
-        parsed.year = fallbackYear;
-        parsed.confidenceNotes = parsed.confidenceNotes
-          ? `${parsed.confidenceNotes} | Year from Comic Vine fallback.`
-          : "Year from Comic Vine fallback.";
+      if (fallbackData) {
+        if (parsed.year === null && fallbackData.year !== null) {
+          parsed.year = fallbackData.year;
+        }
+        if (fallbackData.keyCharacters.length > 0) {
+          parsed.keyCharacters = fallbackData.keyCharacters;
+        }
+        if (fallbackData.keyEvents.length > 0) {
+          parsed.keyEvents = fallbackData.keyEvents;
+        }
+
+        const notes: string[] = [];
+        if (fallbackData.year !== null) {
+          notes.push("Year from Comic Vine fallback.");
+        }
+        if (fallbackData.keyCharacters.length > 0 || fallbackData.keyEvents.length > 0) {
+          notes.push("Key characters/events sourced from Comic Vine.");
+        }
+        if (notes.length > 0) {
+          parsed.confidenceNotes = parsed.confidenceNotes
+            ? `${parsed.confidenceNotes} | ${notes.join(" ")}`
+            : notes.join(" ");
+        }
       }
     }
 
