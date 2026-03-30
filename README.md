@@ -73,7 +73,11 @@ The browser **compresses images client-side** (JPEG, target ≤ 1 MB, preferring
   - `approximateCgcGrade` (string or null; unofficial estimate)
   - `confidenceNotes`
 
-If `title` and `issueNumber` are available, the API attempts a Comic Vine issue match for enrichment. It uses Comic Vine metadata to source `keyCharacters`, and if Gemini returns `year: null`, it fills `year` from Comic Vine `cover_date`/`store_date` when a strong match is found. `keyEvents` (key plot points) come from Gemini visual analysis.
+If `title` and `issueNumber` are available, the API attempts a Comic Vine issue match for enrichment. It uses Comic Vine metadata to source `keyCharacters`, and if Gemini returns `year: null`, it fills `year` from Comic Vine `cover_date`/`store_date` when a strong match is found.
+
+For `keyEvents` (key plot points):
+- Marvel comics: sourced from `marvel.fandom.com` article extract summary.
+- Non-Marvel comics: sourced from Gemini visual analysis.
 
 ## Deploy to Vercel
 

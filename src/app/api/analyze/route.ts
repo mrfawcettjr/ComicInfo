@@ -112,6 +112,8 @@ type ComicVineIssue = {
   cover_date?: string | null;
   store_date?: string | null;
   character_credits?: Array<{ name?: string | null }> | null;
+  api_detail_url?: string | null;
+  publisher?: { name?: string | null } | null;
   volume?: { name?: string | null } | null;
 };
 
@@ -134,6 +136,25 @@ function extractYear(dateString?: string | null) {
   }
   const match = dateString.match(/\b(19|20)\d{2}\b/);
   return match ? Number.parseInt(match[0], 10) : null;
+}
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firstSentences(value: string, maxItems: number) {
+  const plain = stripHtml(value);
+  if (!plain) {
+    return [];
+  }
+  return plain
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 20)
+    .slice(0, maxItems);
 }
 
 function scoreComicVineIssue(
@@ -170,7 +191,54 @@ function scoreComicVineIssue(
 type ComicVineFallbackData = {
   year: number | null;
   keyCharacters: string[];
+  isMarvel: boolean;
 };
+
+type ComicVineIssueDetailResponse = {
+  status_code?: number;
+  results?: {
+    publisher?: { name?: string | null } | null;
+    volume?: {
+      publisher?: { name?: string | null } | null;
+    } | null;
+  } | null;
+};
+
+async function lookupComicVinePublisher(
+  apiDetailUrl: string,
+): Promise<string | null> {
+  const apiKey = comicVineApiKey();
+  if (!apiKey) {
+    return null;
+  }
+
+  const url = new URL(apiDetailUrl);
+  url.searchParams.set("api_key", apiKey);
+  url.searchParams.set("format", "json");
+  url.searchParams.set("field_list", "publisher,volume");
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      "User-Agent": "ComicInfo/1.0",
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as ComicVineIssueDetailResponse;
+  return (
+    payload.results?.publisher?.name ??
+    payload.results?.volume?.publisher?.name ??
+    null
+  );
+}
+
+function isMarvelPublisherName(name: string | null) {
+  return (name ?? "").toLowerCase().includes("marvel");
+}
 
 async function lookupIssueDataFromComicVine(
   title: string,
@@ -189,7 +257,7 @@ async function lookupIssueDataFromComicVine(
   url.searchParams.set("limit", "10");
   url.searchParams.set(
     "field_list",
-    "issue_number,name,cover_date,store_date,character_credits,volume",
+    "issue_number,name,cover_date,store_date,character_credits,api_detail_url,publisher,volume",
   );
   url.searchParams.set("query", query);
 
@@ -224,7 +292,87 @@ async function lookupIssueDataFromComicVine(
     .filter((name) => name.length > 0)
     .slice(0, 10);
 
-  return { year, keyCharacters };
+  let publisherName = best.publisher?.name ?? null;
+  if (!publisherName && best.api_detail_url) {
+    publisherName = await lookupComicVinePublisher(best.api_detail_url);
+  }
+
+  return {
+    year,
+    keyCharacters,
+    isMarvel: isMarvelPublisherName(publisherName),
+  };
+}
+
+type FandomSearchResponse = {
+  query?: {
+    search?: Array<{ title?: string }>;
+  };
+};
+
+type FandomExtractResponse = {
+  query?: {
+    pages?: Record<
+      string,
+      {
+        extract?: string;
+      }
+    >;
+  };
+};
+
+async function fetchMarvelFandomKeyEvents(
+  title: string,
+  issueNumber: string,
+): Promise<string[]> {
+  const query = `${title} #${issueNumber}`;
+  const searchUrl = new URL("https://marvel.fandom.com/api.php");
+  searchUrl.searchParams.set("action", "query");
+  searchUrl.searchParams.set("list", "search");
+  searchUrl.searchParams.set("format", "json");
+  searchUrl.searchParams.set("srsearch", query);
+  searchUrl.searchParams.set("srlimit", "1");
+
+  const searchResponse = await fetch(searchUrl.toString(), {
+    headers: {
+      "User-Agent": "ComicInfo/1.0",
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+  if (!searchResponse.ok) {
+    return [];
+  }
+
+  const searchPayload = (await searchResponse.json()) as FandomSearchResponse;
+  const pageTitle = searchPayload.query?.search?.[0]?.title;
+  if (!pageTitle) {
+    return [];
+  }
+
+  const extractUrl = new URL("https://marvel.fandom.com/api.php");
+  extractUrl.searchParams.set("action", "query");
+  extractUrl.searchParams.set("prop", "extracts");
+  extractUrl.searchParams.set("exintro", "1");
+  extractUrl.searchParams.set("explaintext", "1");
+  extractUrl.searchParams.set("format", "json");
+  extractUrl.searchParams.set("titles", pageTitle);
+
+  const extractResponse = await fetch(extractUrl.toString(), {
+    headers: {
+      "User-Agent": "ComicInfo/1.0",
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+  if (!extractResponse.ok) {
+    return [];
+  }
+
+  const extractPayload = (await extractResponse.json()) as FandomExtractResponse;
+  const page = Object.values(extractPayload.query?.pages ?? {})[0];
+  const extract = page?.extract ?? "";
+  return firstSentences(extract, 5);
 }
 
 export async function POST(request: Request) {
@@ -340,6 +488,15 @@ export async function POST(request: Request) {
         if (fallbackData.keyCharacters.length > 0) {
           parsed.keyCharacters = fallbackData.keyCharacters;
         }
+        if (fallbackData.isMarvel) {
+          const fandomEvents = await fetchMarvelFandomKeyEvents(
+            parsed.title,
+            parsed.issueNumber,
+          );
+          if (fandomEvents.length > 0) {
+            parsed.keyEvents = fandomEvents;
+          }
+        }
 
         const notes: string[] = [];
         if (fallbackData.year !== null) {
@@ -348,7 +505,9 @@ export async function POST(request: Request) {
         if (fallbackData.keyCharacters.length > 0) {
           notes.push("Key characters sourced from Comic Vine.");
         }
-        if (parsed.keyEvents.length > 0) {
+        if (fallbackData.isMarvel && parsed.keyEvents.length > 0) {
+          notes.push("Key plot points sourced from Marvel Fandom.");
+        } else if (parsed.keyEvents.length > 0) {
           notes.push("Key plot points from Gemini visual analysis.");
         }
         if (notes.length > 0) {
