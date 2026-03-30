@@ -41,6 +41,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
    - `GEMINI_API_KEY` is required ([Google AI Studio](https://aistudio.google.com/apikey)).
    - `GEMINI_MODEL` is optional (default is `gemini-2.5-flash`).
    - You may use `GOOGLE_GENERATIVE_AI_API_KEY` instead of `GEMINI_API_KEY` if you prefer.
+   - `COMIC_VINE_API_KEY` is optional. If set, the app uses Comic Vine to backfill `year` when Gemini returns `year: null`.
 
 4. Start dev server:
 
@@ -72,6 +73,8 @@ The browser **compresses images client-side** (JPEG, target ≤ 1 MB, preferring
   - `approximateCgcGrade` (string or null; unofficial estimate)
   - `confidenceNotes`
 
+If `year` is null from Gemini but `title` and `issueNumber` are available, the API attempts a Comic Vine search and fills `year` from `cover_date`/`store_date` when a strong match is found.
+
 ## Deploy to Vercel
 
 1. Push this project to [https://github.com/mrfawcettjr/ComicInfo](https://github.com/mrfawcettjr/ComicInfo).
@@ -79,6 +82,7 @@ The browser **compresses images client-side** (JPEG, target ≤ 1 MB, preferring
 3. Set environment variables in Vercel project settings:
    - `GEMINI_API_KEY` (or `GOOGLE_GENERATIVE_AI_API_KEY`)
    - `GEMINI_MODEL` (optional)
+   - `COMIC_VINE_API_KEY` (optional fallback for publication year)
 4. Deploy. Vercel will build and publish on every push to `main`.
 
 ## Notes

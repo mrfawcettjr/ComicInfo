@@ -22,6 +22,10 @@ function geminiApiKey() {
   return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 }
 
+function comicVineApiKey() {
+  return process.env.COMIC_VINE_API_KEY;
+}
+
 function isSupportedMimeType(type: string) {
   return ACCEPTED_MIME_TYPES.has(type.toLowerCase());
 }
@@ -100,6 +104,114 @@ async function normalizeImage(file: File) {
       mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg",
     };
   }
+}
+
+type ComicVineIssue = {
+  issue_number?: string | null;
+  name?: string | null;
+  cover_date?: string | null;
+  store_date?: string | null;
+  volume?: { name?: string | null } | null;
+};
+
+type ComicVineSearchResponse = {
+  status_code?: number;
+  results?: ComicVineIssue[];
+};
+
+function normalizeTitle(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function normalizeIssueNumber(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9.]+/g, "");
+}
+
+function extractYear(dateString?: string | null) {
+  if (!dateString) {
+    return null;
+  }
+  const match = dateString.match(/\b(19|20)\d{2}\b/);
+  return match ? Number.parseInt(match[0], 10) : null;
+}
+
+function scoreComicVineIssue(
+  issue: ComicVineIssue,
+  expectedTitle: string,
+  expectedIssue: string,
+) {
+  let score = 0;
+  const normalizedTitle = normalizeTitle(expectedTitle);
+  const normalizedIssue = normalizeIssueNumber(expectedIssue);
+  const issueNumber = normalizeIssueNumber(issue.issue_number ?? "");
+  const issueName = normalizeTitle(issue.name ?? "");
+  const volumeName = normalizeTitle(issue.volume?.name ?? "");
+
+  if (issueNumber && issueNumber === normalizedIssue) {
+    score += 80;
+  }
+
+  if (normalizedTitle && volumeName.includes(normalizedTitle)) {
+    score += 30;
+  }
+
+  if (normalizedTitle && issueName.includes(normalizedTitle)) {
+    score += 15;
+  }
+
+  if (extractYear(issue.cover_date) || extractYear(issue.store_date)) {
+    score += 5;
+  }
+
+  return score;
+}
+
+async function lookupYearFromComicVine(
+  title: string,
+  issueNumber: string,
+): Promise<number | null> {
+  const apiKey = comicVineApiKey();
+  if (!apiKey) {
+    return null;
+  }
+
+  const query = `${title} ${issueNumber}`;
+  const url = new URL("https://comicvine.gamespot.com/api/search/");
+  url.searchParams.set("api_key", apiKey);
+  url.searchParams.set("format", "json");
+  url.searchParams.set("resources", "issue");
+  url.searchParams.set("limit", "10");
+  url.searchParams.set(
+    "field_list",
+    "issue_number,name,cover_date,store_date,volume",
+  );
+  url.searchParams.set("query", query);
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      "User-Agent": "ComicInfo/1.0",
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as ComicVineSearchResponse;
+  const issues = Array.isArray(payload.results) ? payload.results : [];
+  if (issues.length === 0) {
+    return null;
+  }
+
+  const sortedByMatch = [...issues].sort(
+    (a, b) =>
+      scoreComicVineIssue(b, title, issueNumber) -
+      scoreComicVineIssue(a, title, issueNumber),
+  );
+  const best = sortedByMatch[0];
+  return extractYear(best.cover_date) ?? extractYear(best.store_date);
 }
 
 export async function POST(request: Request) {
@@ -203,6 +315,18 @@ export async function POST(request: Request) {
     }
 
     const parsed = comicInfoSchema.parse(parsedJson);
+    if (parsed.year === null && parsed.title && parsed.issueNumber) {
+      const fallbackYear = await lookupYearFromComicVine(
+        parsed.title,
+        parsed.issueNumber,
+      );
+      if (fallbackYear !== null) {
+        parsed.year = fallbackYear;
+        parsed.confidenceNotes = parsed.confidenceNotes
+          ? `${parsed.confidenceNotes} | Year from Comic Vine fallback.`
+          : "Year from Comic Vine fallback.";
+      }
+    }
 
     return Response.json({ data: parsed });
   } catch (error) {
