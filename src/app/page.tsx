@@ -14,6 +14,12 @@ type SearchHit = {
   displayLink: string;
 };
 
+type LookupSection = {
+  label: string;
+  query: string;
+  items: SearchHit[];
+};
+
 function isImageFile(file: File) {
   if (file.type.startsWith("image/")) {
     return true;
@@ -63,8 +69,8 @@ export default function Home() {
   const [confirmed, setConfirmed] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
-  const [lookupQuery, setLookupQuery] = useState<string | null>(null);
-  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [lookupBaseQuery, setLookupBaseQuery] = useState<string | null>(null);
+  const [lookupSections, setLookupSections] = useState<LookupSection[]>([]);
 
   const previews = useMemo(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -98,8 +104,8 @@ export default function Home() {
   function resetLookupState() {
     setConfirmed(false);
     setLookupError(null);
-    setLookupQuery(null);
-    setSearchHits([]);
+    setLookupBaseQuery(null);
+    setLookupSections([]);
   }
 
   async function analyze() {
@@ -169,8 +175,8 @@ export default function Home() {
 
     setLookupLoading(true);
     setLookupError(null);
-    setSearchHits([]);
-    setLookupQuery(null);
+    setLookupSections([]);
+    setLookupBaseQuery(null);
 
     try {
       const response = await fetch("/api/lookup", {
@@ -198,8 +204,8 @@ export default function Home() {
       }
 
       const body = payload as {
-        query?: string;
-        items?: SearchHit[];
+        baseQuery?: string;
+        sections?: LookupSection[];
         error?: string;
         details?: string;
       };
@@ -211,8 +217,10 @@ export default function Home() {
       }
 
       setConfirmed(true);
-      setLookupQuery(body.query ?? null);
-      setSearchHits(Array.isArray(body.items) ? body.items : []);
+      setLookupBaseQuery(
+        typeof body.baseQuery === "string" ? body.baseQuery : null,
+      );
+      setLookupSections(Array.isArray(body.sections) ? body.sections : []);
     } catch (lookupErr) {
       setLookupError(
         lookupErr instanceof Error ? lookupErr.message : "Lookup failed.",
@@ -233,8 +241,8 @@ export default function Home() {
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Images are compressed in your browser (≤ 1 MB each) before upload. Identification uses
-          Google Gemini. After confirmation, results use Google Programmable Search (not HTML
-          scraping). Do not upload sensitive images.
+          Google Gemini. After you confirm, plot and character summaries use the Brave Search API
+          (JSON, not HTML scraping). Do not upload sensitive images.
         </p>
       </section>
 
@@ -346,7 +354,8 @@ export default function Home() {
         <section className="space-y-4 rounded-xl border p-4">
           <h2 className="text-xl font-semibold">Identified comic</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Review the fields below. If they look right, confirm to run a Google search.
+            Review the fields below. If they look right, confirm to fetch plot and character
+          information from the web.
           </p>
           <dl className="grid gap-3 text-sm md:grid-cols-2">
             <div>
@@ -380,7 +389,9 @@ export default function Home() {
               disabled={lookupLoading}
               className="cursor-pointer rounded bg-emerald-700 px-4 py-2 text-sm text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-500"
             >
-              {lookupLoading ? "Searching…" : "Yes, this is correct — search the web"}
+              {lookupLoading
+                ? "Searching…"
+                : "Yes, this is correct — look up plot & characters"}
             </button>
           </div>
 
@@ -393,39 +404,71 @@ export default function Home() {
             </div>
           )}
 
-          {confirmed && !lookupError && lookupQuery !== null && (
-            <div className="space-y-3 border-t pt-4 dark:border-zinc-700">
-              <h3 className="text-lg font-semibold">Web results</h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Query: <span className="font-mono text-zinc-700 dark:text-zinc-300">{lookupQuery}</span>
-              </p>
-              {searchHits.length === 0 ? (
+          {confirmed && !lookupError && lookupBaseQuery !== null && (
+            <div className="space-y-6 border-t pt-4 dark:border-zinc-700">
+              <div>
+                <h3 className="text-lg font-semibold">What people say online</h3>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Based on identified title and issue:{" "}
+                  <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                    {lookupBaseQuery}
+                  </span>
+                </p>
+              </div>
+
+              {lookupSections.length === 0 ? (
                 <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  No results returned. Try a different photo or edit the query in the app later.
+                  No sections returned. Try again or use different cover photos.
                 </p>
               ) : (
-                <ul className="space-y-4">
-                  {searchHits.map((hit) => (
-                    <li key={hit.link} className="rounded border border-zinc-200 p-3 dark:border-zinc-700">
-                      <a
-                        href={hit.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block font-medium text-blue-700 hover:underline dark:text-blue-400"
-                      >
-                        {hit.title || hit.link}
-                      </a>
+                lookupSections.map((section) => (
+                  <div key={section.label} className="space-y-3">
+                    <div>
+                      <h4 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+                        {section.label}
+                      </h4>
                       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {hit.displayLink}
+                        Search:{" "}
+                        <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                          {section.query}
+                        </span>
                       </p>
-                      {hit.snippet && (
-                        <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
-                          {hit.snippet}
-                        </p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                    </div>
+                    {!section.items || section.items.length === 0 ? (
+                      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                        No results for this angle. The issue may be obscure or newly published.
+                      </p>
+                    ) : (
+                      <ul className="space-y-4">
+                        {section.items.map((hit, hitIndex) => (
+                          <li
+                            key={`${section.label}-${hitIndex}-${hit.link}`}
+                            className="rounded border border-zinc-200 p-3 dark:border-zinc-700"
+                          >
+                            <a
+                              href={hit.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block font-medium text-blue-700 hover:underline dark:text-blue-400"
+                            >
+                              {hit.title || hit.link}
+                            </a>
+                            {hit.displayLink ? (
+                              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                {hit.displayLink}
+                              </p>
+                            ) : null}
+                            {hit.snippet ? (
+                              <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+                                {hit.snippet}
+                              </p>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))
               )}
             </div>
           )}

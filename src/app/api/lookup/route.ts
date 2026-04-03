@@ -2,29 +2,26 @@ import { lookupRequestSchema } from "@/lib/comic-schema";
 
 export const runtime = "nodejs";
 
-type GoogleSearchItem = {
+const BRAVE_WEB_SEARCH = "https://api.search.brave.com/res/v1/web/search";
+
+type BraveWebResult = {
   title?: string;
-  link?: string;
-  snippet?: string;
-  displayLink?: string;
+  url?: string;
+  description?: string;
+  extra_snippets?: string[];
 };
 
-type GoogleSearchResponse = {
-  items?: GoogleSearchItem[];
-  searchInformation?: {
-    totalResults?: string;
-  };
-  error?: { message?: string };
+type BraveWebSearchResponse = {
+  query?: { original?: string };
+  web?: { results?: BraveWebResult[] };
 };
 
-function googleSearchConfig() {
-  const key =
-    process.env.GOOGLE_CUSTOM_SEARCH_API_KEY ?? process.env.GOOGLE_API_KEY;
-  const cx =
-    process.env.GOOGLE_CUSTOM_SEARCH_ENGINE_ID ??
-    process.env.GOOGLE_CSE_ID ??
-    process.env.GOOGLE_SEARCH_ENGINE_ID;
-  return { key, cx };
+function braveSearchApiKey() {
+  return (
+    process.env.ComicInfo_Brave_Search ??
+    process.env.BRAVE_SEARCH_API_KEY ??
+    process.env.BRAVE_API_KEY
+  );
 }
 
 function buildSearchQuery(body: {
@@ -53,13 +50,69 @@ function buildSearchQuery(body: {
   return parts.join(" ").trim() || "comic book";
 }
 
+function displayLinkFromUrl(url: string) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function snippetFromBraveResult(result: BraveWebResult) {
+  const chunks = [result.description, ...(result.extra_snippets ?? [])].filter(
+    (s): s is string => typeof s === "string" && s.trim().length > 0,
+  );
+  return chunks.join(" ").trim();
+}
+
+async function braveWebSearch(apiKey: string, q: string, count: number) {
+  const url = new URL(BRAVE_WEB_SEARCH);
+  url.searchParams.set("q", q);
+  url.searchParams.set("count", String(Math.min(Math.max(count, 1), 20)));
+  url.searchParams.set("extra_snippets", "true");
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json",
+      "X-Subscription-Token": apiKey,
+    },
+    cache: "no-store",
+  });
+
+  const data = (await response.json()) as BraveWebSearchResponse & {
+    message?: string;
+  };
+
+  if (!response.ok) {
+    const detail =
+      typeof data.message === "string"
+        ? data.message
+        : response.statusText || "Brave Search request failed.";
+    throw new Error(detail);
+  }
+
+  return data;
+}
+
+function mapBraveResults(results: BraveWebResult[] | undefined) {
+  return (results ?? []).map((item) => {
+    const link = item.url ?? "";
+    return {
+      title: item.title ?? "",
+      link,
+      snippet: snippetFromBraveResult(item),
+      displayLink: displayLinkFromUrl(link),
+    };
+  });
+}
+
 export async function POST(request: Request) {
-  const { key, cx } = googleSearchConfig();
-  if (!key || !cx) {
+  const apiKey = braveSearchApiKey();
+  if (!apiKey) {
     return Response.json(
       {
         error:
-          "Google Programmable Search is not configured. Set GOOGLE_CUSTOM_SEARCH_API_KEY and GOOGLE_CUSTOM_SEARCH_ENGINE_ID.",
+          "Brave Search is not configured. Set ComicInfo_Brave_Search (or BRAVE_SEARCH_API_KEY) in the environment.",
       },
       { status: 500 },
     );
@@ -77,40 +130,37 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const q = buildSearchQuery(parsed.data);
-  const url = new URL("https://www.googleapis.com/customsearch/v1");
-  url.searchParams.set("key", key);
-  url.searchParams.set("cx", cx);
-  url.searchParams.set("q", q);
-  url.searchParams.set("num", "10");
+  const baseQuery = buildSearchQuery(parsed.data);
+  const plotQuery = `${baseQuery} comic plot synopsis story`;
+  const charactersQuery = `${baseQuery} comic characters appearances`;
 
-  const response = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
+  try {
+    const [plotData, charactersData] = await Promise.all([
+      braveWebSearch(apiKey, plotQuery, 10),
+      braveWebSearch(apiKey, charactersQuery, 10),
+    ]);
 
-  const data = (await response.json()) as GoogleSearchResponse;
-
-  if (!response.ok) {
+    return Response.json({
+      baseQuery,
+      sections: [
+        {
+          label: "Plot & story",
+          query: plotQuery,
+          items: mapBraveResults(plotData.web?.results),
+        },
+        {
+          label: "Characters",
+          query: charactersQuery,
+          items: mapBraveResults(charactersData.web?.results),
+        },
+      ],
+    });
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Brave Search request failed.";
     return Response.json(
-      {
-        error: "Google search request failed.",
-        details: data.error?.message ?? response.statusText,
-      },
+      { error: "Brave search request failed.", details: message },
       { status: 502 },
     );
   }
-
-  const items = (data.items ?? []).map((item) => ({
-    title: item.title ?? "",
-    link: item.link ?? "",
-    snippet: item.snippet ?? "",
-    displayLink: item.displayLink ?? "",
-  }));
-
-  return Response.json({
-    query: q,
-    totalResults: data.searchInformation?.totalResults ?? "0",
-    items,
-  });
 }

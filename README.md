@@ -7,7 +7,7 @@ ComicInfo is a Next.js web app that analyzes up to four comic cover photos and r
 - **Year** and **month** of publication (when visible)
 - **Volume or series** label (when visible)
 
-After you confirm the identification, the app runs a **Google Programmable Search** web search and displays result titles, links, and snippets.
+After you confirm the identification, the app uses the **Brave Search API** to fetch web results focused on **plot & story** and **characters**, and displays titles, links, and snippets.
 
 It is designed to run locally on a MacBook Pro and deploy to Vercel.
 
@@ -17,7 +17,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 - Tailwind CSS
 - **Google Gemini** (multimodal vision) — `POST /api/analyze`
 - Optional **Comic Vine** — enriches `year` and `volumeOrSeries` when a matching issue is found
-- **Google Custom Search JSON API** — `POST /api/lookup` (after user confirmation; not HTML scraping)
+- **Brave Search API** — `POST /api/lookup` (after user confirmation; JSON API, not HTML scraping)
 
 ## Local setup
 
@@ -39,7 +39,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
    - `GEMINI_MODEL` — optional (default `gemini-2.5-flash`).
    - `GOOGLE_GENERATIVE_AI_API_KEY` — optional alias for `GEMINI_API_KEY`.
    - `COMIC_VINE_API_KEY` — optional; helps year / series when Gemini omits them.
-   - `GOOGLE_CUSTOM_SEARCH_API_KEY` and `GOOGLE_CUSTOM_SEARCH_ENGINE_ID` — required for the confirmation search. Create a [Programmable Search Engine](https://programmablesearchengine.google.com/) and enable the Custom Search JSON API in Google Cloud.
+   - `ComicInfo_Brave_Search` (or `BRAVE_SEARCH_API_KEY`) — required for post-confirmation plot/character search. Get a key from the [Brave Search API](https://api-dashboard.search.brave.com/).
 
 4. Start dev server:
 
@@ -53,7 +53,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 
 1. Add up to four comic photos (client compresses to ≤ 1 MB each).
 2. Click **Analyze** to extract identification fields.
-3. Click **Yes, this is correct — search the web** to fetch Google search results for that metadata.
+3. Click **Yes, this is correct — look up plot & characters** to fetch Brave search results for that metadata.
 
 ## API
 
@@ -65,7 +65,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 ### `POST /api/lookup`
 
 - Body: JSON `{ title?, issueNumber?, year?, month?, volumeOrSeries? }`
-- Returns: `{ query, totalResults, items: [{ title, link, snippet, displayLink }] }`
+- Returns: `{ baseQuery, sections: [{ label, query, items: [{ title, link, snippet, displayLink }] }] }` — two sections (plot & story, characters) from parallel Brave web searches.
 
 ## Deploy to Vercel
 
@@ -75,10 +75,10 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
    - `GEMINI_API_KEY` (or `GOOGLE_GENERATIVE_AI_API_KEY`)
    - `GEMINI_MODEL` (optional)
    - `COMIC_VINE_API_KEY` (optional)
-   - `GOOGLE_CUSTOM_SEARCH_API_KEY` and `GOOGLE_CUSTOM_SEARCH_ENGINE_ID` (for search after confirmation)
+   - `ComicInfo_Brave_Search` or `BRAVE_SEARCH_API_KEY` (for plot/character search after confirmation)
 
 ## Notes
 
 - Uploaded images are sent to Google’s Gemini API for identification.
-- **Web search** uses Google’s official Custom Search API — not scraping `google.com` HTML (which is unreliable and often blocked).
+- **Web search** uses Brave’s Search API — not scraping search HTML.
 - Comic Vine enrichment depends on title/issue matching; ambiguous titles may not match.
