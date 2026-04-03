@@ -30,3 +30,12 @@ export const lookupRequestSchema = z.object({
 });
 
 export type LookupRequest = z.infer<typeof lookupRequestSchema>;
+
+/** Gemini summary of Brave snippets, scoped to one identified issue. */
+export const issueSummarySchema = z.object({
+  keyFeatures: z.array(z.string()),
+  stories: z.string(),
+  caveat: z.string().nullable().optional(),
+});
+
+export type IssueSummary = z.infer<typeof issueSummarySchema>;

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ComicIdentification } from "@/lib/comic-schema";
+import type { ComicIdentification, IssueSummary } from "@/lib/comic-schema";
 import { compressImageForUpload } from "@/lib/compress-image";
 
 const MAX_IMAGES = 4;
@@ -68,6 +68,12 @@ export default function Home() {
     null,
   );
   const [lookupSearchHits, setLookupSearchHits] = useState<SearchHit[]>([]);
+  const [lookupIssueSummary, setLookupIssueSummary] = useState<IssueSummary | null>(
+    null,
+  );
+  const [lookupSummaryError, setLookupSummaryError] = useState<string | null>(
+    null,
+  );
 
   const previews = useMemo(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -104,6 +110,8 @@ export default function Home() {
     setLookupBaseQuery(null);
     setLookupTellMeQuery(null);
     setLookupSearchHits([]);
+    setLookupIssueSummary(null);
+    setLookupSummaryError(null);
   }
 
   async function analyze() {
@@ -175,6 +183,8 @@ export default function Home() {
     setLookupError(null);
     setLookupTellMeQuery(null);
     setLookupSearchHits([]);
+    setLookupIssueSummary(null);
+    setLookupSummaryError(null);
     setLookupBaseQuery(null);
 
     try {
@@ -206,6 +216,8 @@ export default function Home() {
         baseQuery?: string;
         tellMeQuery?: string;
         items?: SearchHit[];
+        issueSummary?: IssueSummary | null;
+        summaryError?: string;
         error?: string;
         details?: string;
       };
@@ -224,6 +236,23 @@ export default function Home() {
         typeof body.tellMeQuery === "string" ? body.tellMeQuery : null,
       );
       setLookupSearchHits(Array.isArray(body.items) ? body.items : []);
+      setLookupSummaryError(
+        typeof body.summaryError === "string" ? body.summaryError : null,
+      );
+      if (
+        body.issueSummary &&
+        typeof body.issueSummary === "object" &&
+        Array.isArray(body.issueSummary.keyFeatures) &&
+        typeof body.issueSummary.stories === "string"
+      ) {
+        setLookupIssueSummary({
+          keyFeatures: body.issueSummary.keyFeatures,
+          stories: body.issueSummary.stories,
+          caveat: body.issueSummary.caveat ?? null,
+        });
+      } else {
+        setLookupIssueSummary(null);
+      }
     } catch (lookupErr) {
       setLookupError(
         lookupErr instanceof Error ? lookupErr.message : "Lookup failed.",
@@ -244,9 +273,9 @@ export default function Home() {
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Images are compressed in your browser (≤ 1 MB each) before upload. Identification uses
-          Google Gemini. After you confirm, we search the web with Brave using a “Tell me about …”
-          query for the identified comic (JSON API, not HTML scraping). Do not upload sensitive
-          images.
+          Google Gemini. After you confirm, we search with Brave, then Gemini summarizes key
+          features and stories for that issue only (Brave: JSON API, not HTML scraping). Do not
+          upload sensitive images.
         </p>
       </section>
 
@@ -394,7 +423,7 @@ export default function Home() {
               className="cursor-pointer rounded bg-emerald-700 px-4 py-2 text-sm text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-500"
             >
               {lookupLoading
-                ? "Searching…"
+                ? "Looking up & summarizing…"
                 : "Yes, this is correct — tell me about this comic"}
             </button>
           </div>
@@ -412,54 +441,113 @@ export default function Home() {
             !lookupError &&
             lookupBaseQuery !== null &&
             lookupTellMeQuery !== null && (
-            <div className="space-y-4 border-t pt-4 dark:border-zinc-700">
-              <div>
-                <h3 className="text-lg font-semibold">Tell me about…</h3>
-                <p className="mt-2 text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
-                  {lookupTellMeQuery}
-                </p>
-                <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                  Identified comic:{" "}
+            <div className="space-y-6 border-t pt-4 dark:border-zinc-700">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Issue you identified:{" "}
+                <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                  {lookupBaseQuery}
+                </span>
+              </p>
+
+              {lookupSummaryError ? (
+                <div
+                  className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                  role="status"
+                >
+                  {lookupSummaryError}
+                </div>
+              ) : null}
+
+              {lookupIssueSummary ? (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">This issue</h3>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    Key features and stories for this issue only (other issues and series are
+                    filtered out when possible).
+                  </p>
+                  {lookupIssueSummary.keyFeatures.length > 0 ? (
+                    <div>
+                      <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        Key features
+                      </h4>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-800 dark:text-zinc-200">
+                        {lookupIssueSummary.keyFeatures.map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {lookupIssueSummary.stories.trim() ? (
+                    <div>
+                      <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        Stories
+                      </h4>
+                      <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+                        {lookupIssueSummary.stories}
+                      </div>
+                    </div>
+                  ) : null}
+                  {lookupIssueSummary.caveat?.trim() ? (
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      Note: {lookupIssueSummary.caveat}
+                    </p>
+                  ) : null}
+                  {lookupIssueSummary.keyFeatures.length === 0 &&
+                  !lookupIssueSummary.stories.trim() &&
+                  !lookupIssueSummary.caveat?.trim() ? (
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      No summary lines were returned for this issue. Check web sources below or try
+                      a clearer cover photo.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="space-y-3 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+                <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-200">
+                  Web sources
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Brave query:{" "}
                   <span className="font-mono text-zinc-700 dark:text-zinc-300">
-                    {lookupBaseQuery}
+                    {lookupTellMeQuery}
                   </span>
                 </p>
-              </div>
-
-              {lookupSearchHits.length === 0 ? (
-                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  No web results returned. The issue may be obscure or newly published — try
-                  different cover photos.
-                </p>
-              ) : (
-                <ul className="space-y-4">
-                  {lookupSearchHits.map((hit, hitIndex) => (
-                    <li
-                      key={`${hitIndex}-${hit.link}`}
-                      className="rounded border border-zinc-200 p-3 dark:border-zinc-700"
-                    >
-                      <a
-                        href={hit.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block font-medium text-blue-700 hover:underline dark:text-blue-400"
+                {lookupSearchHits.length === 0 ? (
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    No web results returned. The issue may be obscure or newly published — try
+                    different cover photos.
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {lookupSearchHits.map((hit, hitIndex) => (
+                      <li
+                        key={`${hitIndex}-${hit.link}`}
+                        className="rounded border border-zinc-200 p-3 dark:border-zinc-700"
                       >
-                        {hit.title || hit.link}
-                      </a>
-                      {hit.displayLink ? (
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                          {hit.displayLink}
-                        </p>
-                      ) : null}
-                      {hit.snippet ? (
-                        <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
-                          {hit.snippet}
-                        </p>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
+                        <a
+                          href={hit.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-sm font-medium text-blue-700 hover:underline dark:text-blue-400"
+                        >
+                          {hit.title || hit.link}
+                        </a>
+                        {hit.displayLink ? (
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                            {hit.displayLink}
+                          </p>
+                        ) : null}
+                        {hit.snippet ? (
+                          <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                            {hit.snippet}
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
         </section>

@@ -7,7 +7,7 @@ ComicInfo is a Next.js web app that analyzes up to four comic cover photos and r
 - **Year** and **month** of publication (when visible)
 - **Volume or series** label (when visible)
 
-After you confirm the identification, the app uses the **Brave Search API** with a **“Tell me about …”** query built from the identified comic, and displays result titles, links, and snippets.
+After you confirm the identification, the app uses the **Brave Search API** with a **“Tell me about …”** query, then **Google Gemini** summarizes **key features and stories for that issue only** (filtering other issues when possible), and lists the raw Brave hits as sources.
 
 It is designed to run locally on a MacBook Pro and deploy to Vercel.
 
@@ -65,7 +65,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 ### `POST /api/lookup`
 
 - Body: JSON `{ title?, issueNumber?, year?, month?, volumeOrSeries? }`
-- Returns: `{ baseQuery, tellMeQuery, items: [{ title, link, snippet, displayLink }] }` — Brave web search for `Tell me about {identified comic}`.
+- Returns: `{ baseQuery, tellMeQuery, items, issueSummary?, summaryError? }` — Brave web search for `Tell me about {identified comic}`; `issueSummary` is `{ keyFeatures: string[], stories: string, caveat?: string | null }` from Gemini when configured and results exist.
 
 ## Deploy to Vercel
 
