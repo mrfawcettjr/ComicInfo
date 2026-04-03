@@ -7,13 +7,6 @@ import { compressImageForUpload } from "@/lib/compress-image";
 
 const MAX_IMAGES = 4;
 
-type SearchHit = {
-  title: string;
-  link: string;
-  snippet: string;
-  displayLink: string;
-};
-
 function isImageFile(file: File) {
   if (file.type.startsWith("image/")) {
     return true;
@@ -64,10 +57,6 @@ export default function Home() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [lookupBaseQuery, setLookupBaseQuery] = useState<string | null>(null);
-  const [lookupTellMeQuery, setLookupTellMeQuery] = useState<string | null>(
-    null,
-  );
-  const [lookupSearchHits, setLookupSearchHits] = useState<SearchHit[]>([]);
   const [lookupIssueSummary, setLookupIssueSummary] = useState<IssueSummary | null>(
     null,
   );
@@ -108,8 +97,6 @@ export default function Home() {
     setConfirmed(false);
     setLookupError(null);
     setLookupBaseQuery(null);
-    setLookupTellMeQuery(null);
-    setLookupSearchHits([]);
     setLookupIssueSummary(null);
     setLookupSummaryError(null);
   }
@@ -181,8 +168,6 @@ export default function Home() {
 
     setLookupLoading(true);
     setLookupError(null);
-    setLookupTellMeQuery(null);
-    setLookupSearchHits([]);
     setLookupIssueSummary(null);
     setLookupSummaryError(null);
     setLookupBaseQuery(null);
@@ -214,8 +199,6 @@ export default function Home() {
 
       const body = payload as {
         baseQuery?: string;
-        tellMeQuery?: string;
-        items?: SearchHit[];
         issueSummary?: IssueSummary | null;
         summaryError?: string;
         error?: string;
@@ -232,10 +215,6 @@ export default function Home() {
       setLookupBaseQuery(
         typeof body.baseQuery === "string" ? body.baseQuery : null,
       );
-      setLookupTellMeQuery(
-        typeof body.tellMeQuery === "string" ? body.tellMeQuery : null,
-      );
-      setLookupSearchHits(Array.isArray(body.items) ? body.items : []);
       setLookupSummaryError(
         typeof body.summaryError === "string" ? body.summaryError : null,
       );
@@ -437,10 +416,7 @@ export default function Home() {
             </div>
           )}
 
-          {confirmed &&
-            !lookupError &&
-            lookupBaseQuery !== null &&
-            lookupTellMeQuery !== null && (
+          {confirmed && !lookupError && lookupBaseQuery !== null && (
             <div className="space-y-6 border-t pt-4 dark:border-zinc-700">
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 Issue you identified:{" "}
@@ -496,58 +472,12 @@ export default function Home() {
                   !lookupIssueSummary.stories.trim() &&
                   !lookupIssueSummary.caveat?.trim() ? (
                     <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                      No summary lines were returned for this issue. Check web sources below or try
-                      a clearer cover photo.
+                      No summary lines were returned for this issue. Try a clearer cover photo or
+                      analyze again.
                     </p>
                   ) : null}
                 </div>
               ) : null}
-
-              <div className="space-y-3 border-t border-zinc-200 pt-4 dark:border-zinc-700">
-                <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-200">
-                  Web sources
-                </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Brave query:{" "}
-                  <span className="font-mono text-zinc-700 dark:text-zinc-300">
-                    {lookupTellMeQuery}
-                  </span>
-                </p>
-                {lookupSearchHits.length === 0 ? (
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                    No web results returned. The issue may be obscure or newly published — try
-                    different cover photos.
-                  </p>
-                ) : (
-                  <ul className="space-y-3">
-                    {lookupSearchHits.map((hit, hitIndex) => (
-                      <li
-                        key={`${hitIndex}-${hit.link}`}
-                        className="rounded border border-zinc-200 p-3 dark:border-zinc-700"
-                      >
-                        <a
-                          href={hit.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block text-sm font-medium text-blue-700 hover:underline dark:text-blue-400"
-                        >
-                          {hit.title || hit.link}
-                        </a>
-                        {hit.displayLink ? (
-                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                            {hit.displayLink}
-                          </p>
-                        ) : null}
-                        {hit.snippet ? (
-                          <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                            {hit.snippet}
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
             </div>
           )}
         </section>
