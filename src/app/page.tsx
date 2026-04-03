@@ -14,12 +14,6 @@ type SearchHit = {
   displayLink: string;
 };
 
-type LookupSection = {
-  label: string;
-  query: string;
-  items: SearchHit[];
-};
-
 function isImageFile(file: File) {
   if (file.type.startsWith("image/")) {
     return true;
@@ -70,7 +64,10 @@ export default function Home() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [lookupBaseQuery, setLookupBaseQuery] = useState<string | null>(null);
-  const [lookupSections, setLookupSections] = useState<LookupSection[]>([]);
+  const [lookupTellMeQuery, setLookupTellMeQuery] = useState<string | null>(
+    null,
+  );
+  const [lookupSearchHits, setLookupSearchHits] = useState<SearchHit[]>([]);
 
   const previews = useMemo(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -105,7 +102,8 @@ export default function Home() {
     setConfirmed(false);
     setLookupError(null);
     setLookupBaseQuery(null);
-    setLookupSections([]);
+    setLookupTellMeQuery(null);
+    setLookupSearchHits([]);
   }
 
   async function analyze() {
@@ -175,7 +173,8 @@ export default function Home() {
 
     setLookupLoading(true);
     setLookupError(null);
-    setLookupSections([]);
+    setLookupTellMeQuery(null);
+    setLookupSearchHits([]);
     setLookupBaseQuery(null);
 
     try {
@@ -205,7 +204,8 @@ export default function Home() {
 
       const body = payload as {
         baseQuery?: string;
-        sections?: LookupSection[];
+        tellMeQuery?: string;
+        items?: SearchHit[];
         error?: string;
         details?: string;
       };
@@ -220,7 +220,10 @@ export default function Home() {
       setLookupBaseQuery(
         typeof body.baseQuery === "string" ? body.baseQuery : null,
       );
-      setLookupSections(Array.isArray(body.sections) ? body.sections : []);
+      setLookupTellMeQuery(
+        typeof body.tellMeQuery === "string" ? body.tellMeQuery : null,
+      );
+      setLookupSearchHits(Array.isArray(body.items) ? body.items : []);
     } catch (lookupErr) {
       setLookupError(
         lookupErr instanceof Error ? lookupErr.message : "Lookup failed.",
@@ -236,13 +239,14 @@ export default function Home() {
         <h1 className="text-3xl font-semibold tracking-tight">ComicInfo</h1>
         <p className="text-zinc-600 dark:text-zinc-300">
           Upload photos of a comic cover. We identify the title, issue, publication month/year,
-          and series or volume when visible. Confirm the details, then search the web for
-          related results.
+          and series or volume when visible. Confirm the details, then we ask the web “Tell me
+          about …” that comic.
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Images are compressed in your browser (≤ 1 MB each) before upload. Identification uses
-          Google Gemini. After you confirm, plot and character summaries use the Brave Search API
-          (JSON, not HTML scraping). Do not upload sensitive images.
+          Google Gemini. After you confirm, we search the web with Brave using a “Tell me about …”
+          query for the identified comic (JSON API, not HTML scraping). Do not upload sensitive
+          images.
         </p>
       </section>
 
@@ -354,8 +358,8 @@ export default function Home() {
         <section className="space-y-4 rounded-xl border p-4">
           <h2 className="text-xl font-semibold">Identified comic</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Review the fields below. If they look right, confirm to fetch plot and character
-          information from the web.
+            Review the fields below. If they look right, confirm to search the web with “Tell me
+            about …” for this comic.
           </p>
           <dl className="grid gap-3 text-sm md:grid-cols-2">
             <div>
@@ -391,7 +395,7 @@ export default function Home() {
             >
               {lookupLoading
                 ? "Searching…"
-                : "Yes, this is correct — look up plot & characters"}
+                : "Yes, this is correct — tell me about this comic"}
             </button>
           </div>
 
@@ -404,71 +408,57 @@ export default function Home() {
             </div>
           )}
 
-          {confirmed && !lookupError && lookupBaseQuery !== null && (
-            <div className="space-y-6 border-t pt-4 dark:border-zinc-700">
+          {confirmed &&
+            !lookupError &&
+            lookupBaseQuery !== null &&
+            lookupTellMeQuery !== null && (
+            <div className="space-y-4 border-t pt-4 dark:border-zinc-700">
               <div>
-                <h3 className="text-lg font-semibold">What people say online</h3>
-                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Based on identified title and issue:{" "}
+                <h3 className="text-lg font-semibold">Tell me about…</h3>
+                <p className="mt-2 text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+                  {lookupTellMeQuery}
+                </p>
+                <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  Identified comic:{" "}
                   <span className="font-mono text-zinc-700 dark:text-zinc-300">
                     {lookupBaseQuery}
                   </span>
                 </p>
               </div>
 
-              {lookupSections.length === 0 ? (
+              {lookupSearchHits.length === 0 ? (
                 <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  No sections returned. Try again or use different cover photos.
+                  No web results returned. The issue may be obscure or newly published — try
+                  different cover photos.
                 </p>
               ) : (
-                lookupSections.map((section) => (
-                  <div key={section.label} className="space-y-3">
-                    <div>
-                      <h4 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                        {section.label}
-                      </h4>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        Search:{" "}
-                        <span className="font-mono text-zinc-700 dark:text-zinc-300">
-                          {section.query}
-                        </span>
-                      </p>
-                    </div>
-                    {!section.items || section.items.length === 0 ? (
-                      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                        No results for this angle. The issue may be obscure or newly published.
-                      </p>
-                    ) : (
-                      <ul className="space-y-4">
-                        {section.items.map((hit, hitIndex) => (
-                          <li
-                            key={`${section.label}-${hitIndex}-${hit.link}`}
-                            className="rounded border border-zinc-200 p-3 dark:border-zinc-700"
-                          >
-                            <a
-                              href={hit.link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block font-medium text-blue-700 hover:underline dark:text-blue-400"
-                            >
-                              {hit.title || hit.link}
-                            </a>
-                            {hit.displayLink ? (
-                              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                                {hit.displayLink}
-                              </p>
-                            ) : null}
-                            {hit.snippet ? (
-                              <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
-                                {hit.snippet}
-                              </p>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ))
+                <ul className="space-y-4">
+                  {lookupSearchHits.map((hit, hitIndex) => (
+                    <li
+                      key={`${hitIndex}-${hit.link}`}
+                      className="rounded border border-zinc-200 p-3 dark:border-zinc-700"
+                    >
+                      <a
+                        href={hit.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block font-medium text-blue-700 hover:underline dark:text-blue-400"
+                      >
+                        {hit.title || hit.link}
+                      </a>
+                      {hit.displayLink ? (
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {hit.displayLink}
+                        </p>
+                      ) : null}
+                      {hit.snippet ? (
+                        <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+                          {hit.snippet}
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
           )}

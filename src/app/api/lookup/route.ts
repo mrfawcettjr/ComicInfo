@@ -131,29 +131,15 @@ export async function POST(request: Request) {
   }
 
   const baseQuery = buildSearchQuery(parsed.data);
-  const plotQuery = `${baseQuery} comic plot synopsis story`;
-  const charactersQuery = `${baseQuery} comic characters appearances`;
+  const tellMeQuery = `Tell me about ${baseQuery}`;
 
   try {
-    const [plotData, charactersData] = await Promise.all([
-      braveWebSearch(apiKey, plotQuery, 10),
-      braveWebSearch(apiKey, charactersQuery, 10),
-    ]);
+    const data = await braveWebSearch(apiKey, tellMeQuery, 10);
 
     return Response.json({
       baseQuery,
-      sections: [
-        {
-          label: "Plot & story",
-          query: plotQuery,
-          items: mapBraveResults(plotData.web?.results),
-        },
-        {
-          label: "Characters",
-          query: charactersQuery,
-          items: mapBraveResults(charactersData.web?.results),
-        },
-      ],
+      tellMeQuery,
+      items: mapBraveResults(data.web?.results),
     });
   } catch (err) {
     const message =

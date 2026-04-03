@@ -7,7 +7,7 @@ ComicInfo is a Next.js web app that analyzes up to four comic cover photos and r
 - **Year** and **month** of publication (when visible)
 - **Volume or series** label (when visible)
 
-After you confirm the identification, the app uses the **Brave Search API** to fetch web results focused on **plot & story** and **characters**, and displays titles, links, and snippets.
+After you confirm the identification, the app uses the **Brave Search API** with a **“Tell me about …”** query built from the identified comic, and displays result titles, links, and snippets.
 
 It is designed to run locally on a MacBook Pro and deploy to Vercel.
 
@@ -39,7 +39,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
    - `GEMINI_MODEL` — optional (default `gemini-2.5-flash`).
    - `GOOGLE_GENERATIVE_AI_API_KEY` — optional alias for `GEMINI_API_KEY`.
    - `COMIC_VINE_API_KEY` — optional; helps year / series when Gemini omits them.
-   - `ComicInfo_Brave_Search` (or `BRAVE_SEARCH_API_KEY`) — required for post-confirmation plot/character search. Get a key from the [Brave Search API](https://api-dashboard.search.brave.com/).
+   - `ComicInfo_Brave_Search` (or `BRAVE_SEARCH_API_KEY`) — required for post-confirmation “Tell me about …” search. Get a key from the [Brave Search API](https://api-dashboard.search.brave.com/).
 
 4. Start dev server:
 
@@ -53,7 +53,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 
 1. Add up to four comic photos (client compresses to ≤ 1 MB each).
 2. Click **Analyze** to extract identification fields.
-3. Click **Yes, this is correct — look up plot & characters** to fetch Brave search results for that metadata.
+3. Click **Yes, this is correct — tell me about this comic** to run Brave search for that metadata.
 
 ## API
 
@@ -65,7 +65,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 ### `POST /api/lookup`
 
 - Body: JSON `{ title?, issueNumber?, year?, month?, volumeOrSeries? }`
-- Returns: `{ baseQuery, sections: [{ label, query, items: [{ title, link, snippet, displayLink }] }] }` — two sections (plot & story, characters) from parallel Brave web searches.
+- Returns: `{ baseQuery, tellMeQuery, items: [{ title, link, snippet, displayLink }] }` — Brave web search for `Tell me about {identified comic}`.
 
 ## Deploy to Vercel
 
@@ -75,7 +75,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
    - `GEMINI_API_KEY` (or `GOOGLE_GENERATIVE_AI_API_KEY`)
    - `GEMINI_MODEL` (optional)
    - `COMIC_VINE_API_KEY` (optional)
-   - `ComicInfo_Brave_Search` or `BRAVE_SEARCH_API_KEY` (for plot/character search after confirmation)
+   - `ComicInfo_Brave_Search` or `BRAVE_SEARCH_API_KEY` (for “Tell me about …” search after confirmation)
 
 ## Notes
 
