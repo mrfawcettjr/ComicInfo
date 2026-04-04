@@ -86,6 +86,26 @@ function isWhatMadeSpecialEmpty(section: WhatMadeSpecialSection) {
   );
 }
 
+/** Empty field uses the identified year; non-empty must be a plausible publication year. */
+function parseYearForLookup(
+  draft: string,
+  identifiedYear: number | null,
+): { ok: true; year: number | null } | { ok: false; message: string } {
+  const t = draft.trim();
+  if (t === "") {
+    return { ok: true, year: identifiedYear };
+  }
+  const n = Number.parseInt(t, 10);
+  if (!Number.isFinite(n) || n < 1800 || n > 2100) {
+    return {
+      ok: false,
+      message:
+        "Year must be a number between 1800 and 2100, or leave the field empty to use the year from identification.",
+    };
+  }
+  return { ok: true, year: n };
+}
+
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
@@ -103,6 +123,8 @@ export default function Home() {
   const [lookupSummaryError, setLookupSummaryError] = useState<string | null>(
     null,
   );
+  /** Editable year before lookup; synced from `result` when analysis completes. */
+  const [yearDraft, setYearDraft] = useState("");
 
   const previews = useMemo(
     () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
@@ -114,6 +136,14 @@ export default function Home() {
       previews.forEach((preview) => URL.revokeObjectURL(preview.url));
     };
   }, [previews]);
+
+  useEffect(() => {
+    if (result) {
+      setYearDraft(result.year != null ? String(result.year) : "");
+    } else {
+      setYearDraft("");
+    }
+  }, [result]);
 
   function mergeFiles(incoming: File[]) {
     const imageFiles = incoming.filter((file) => isImageFile(file));
@@ -206,6 +236,12 @@ export default function Home() {
       return;
     }
 
+    const yearParsed = parseYearForLookup(yearDraft, result.year);
+    if (!yearParsed.ok) {
+      setLookupError(yearParsed.message);
+      return;
+    }
+
     setLookupLoading(true);
     setLookupError(null);
     setLookupIssueSummary(null);
@@ -219,7 +255,7 @@ export default function Home() {
         body: JSON.stringify({
           title: result.title,
           issueNumber: result.issueNumber,
-          year: result.year,
+          year: yearParsed.year,
           month: result.month,
           volumeOrSeries: result.volumeOrSeries,
         }),
@@ -416,7 +452,8 @@ export default function Home() {
           <h2 className="text-xl font-semibold">Identified comic</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Review the fields below. If they look right, confirm to search the web with “Tell me
-            about …” for this comic.
+            about …” for this comic. You can fix the year if identification got it wrong — that
+            value is used for the Brave search and summary.
           </p>
           <dl className="grid gap-3 text-sm md:grid-cols-2">
             <div>
@@ -429,7 +466,26 @@ export default function Home() {
             </div>
             <div>
               <dt className="font-medium text-zinc-950 dark:text-zinc-50">Year</dt>
-              <dd className="mt-1">{displayValue(result.year)}</dd>
+              <dd className="mt-1">
+                <label htmlFor="year-override" className="sr-only">
+                  Year (editable — used for lookup)
+                </label>
+                <input
+                  id="year-override"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  disabled={lookupLoading}
+                  value={yearDraft}
+                  onChange={(event) => setYearDraft(event.target.value)}
+                  placeholder={result.year != null ? String(result.year) : "e.g. 1985"}
+                  className="w-full max-w-[12rem] rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-400 dark:focus:ring-zinc-400"
+                />
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Detected: {displayValue(result.year)}. Leave blank to keep that value, or type
+                  1800–2100 to override for the lookup only.
+                </p>
+              </dd>
             </div>
             <div>
               <dt className="font-medium text-zinc-950 dark:text-zinc-50">Month</dt>
