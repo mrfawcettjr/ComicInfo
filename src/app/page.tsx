@@ -123,6 +123,10 @@ export default function Home() {
   const [lookupSummaryError, setLookupSummaryError] = useState<string | null>(
     null,
   );
+  const [lookupSheetExport, setLookupSheetExport] = useState<{
+    appended: boolean;
+    error?: string;
+  } | null>(null);
   /** Editable year before lookup; synced from `result` when analysis completes. */
   const [yearDraft, setYearDraft] = useState("");
 
@@ -169,6 +173,7 @@ export default function Home() {
     setLookupBaseQuery(null);
     setLookupIssueSummary(null);
     setLookupSummaryError(null);
+    setLookupSheetExport(null);
   }
 
   async function analyze() {
@@ -247,6 +252,7 @@ export default function Home() {
     setLookupIssueSummary(null);
     setLookupSummaryError(null);
     setLookupBaseQuery(null);
+    setLookupSheetExport(null);
 
     try {
       const response = await fetch("/api/lookup", {
@@ -258,6 +264,7 @@ export default function Home() {
           year: yearParsed.year,
           month: result.month,
           volumeOrSeries: result.volumeOrSeries,
+          yearIdentified: result.year,
         }),
       });
 
@@ -277,6 +284,7 @@ export default function Home() {
         baseQuery?: string;
         issueSummary?: IssueSummary | null;
         summaryError?: string;
+        sheetExport?: { appended?: boolean; error?: string };
         error?: string;
         details?: string;
       };
@@ -291,6 +299,23 @@ export default function Home() {
       setLookupBaseQuery(
         typeof body.baseQuery === "string" ? body.baseQuery : null,
       );
+      if (body.sheetExport && typeof body.sheetExport === "object") {
+        const se = body.sheetExport as {
+          appended?: boolean;
+          error?: string;
+          skipped?: boolean;
+        };
+        if (se.skipped) {
+          setLookupSheetExport(null);
+        } else {
+          setLookupSheetExport({
+            appended: Boolean(se.appended),
+            error: typeof se.error === "string" ? se.error : undefined,
+          });
+        }
+      } else {
+        setLookupSheetExport(null);
+      }
       setLookupSummaryError(
         typeof body.summaryError === "string" ? body.summaryError : null,
       );
@@ -520,6 +545,30 @@ export default function Home() {
               {lookupError}
             </div>
           )}
+
+          {confirmed &&
+            !lookupError &&
+            lookupSheetExport?.appended && (
+              <div
+                className="rounded border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
+                role="status"
+              >
+                Row appended to your Google Sheet (eBay staging columns).
+              </div>
+            )}
+
+          {confirmed &&
+            !lookupError &&
+            lookupSheetExport &&
+            !lookupSheetExport.appended &&
+            lookupSheetExport.error && (
+              <div
+                className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                role="status"
+              >
+                Google Sheets export failed: {lookupSheetExport.error}
+              </div>
+            )}
 
           {confirmed && !lookupError && lookupBaseQuery !== null && (
             <div className="space-y-6 border-t pt-4 dark:border-zinc-700">

@@ -64,8 +64,17 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 
 ### `POST /api/lookup`
 
-- Body: JSON `{ title?, issueNumber?, year?, month?, volumeOrSeries? }`
-- Returns: `{ baseQuery, tellMeQuery, items, issueSummary?, summaryError? }` — Brave web search for `Tell me about {identified comic}`; `items` are raw hits (for API consumers); `issueSummary` includes `whatMadeSpecial` as `{ debutsRevelationsAndDeaths, significantCharacterMoments, overallSignificance, collectorValue }` (strings; empty when unknown), plus `keyFeatures`, `keyCharacters` (max 10), `stories`, `caveat?`.
+- Body: JSON `{ title?, issueNumber?, year?, month?, volumeOrSeries?, yearIdentified? }` — `yearIdentified` is the analyzed year before user override (used for the Google Sheet `year_identified` column).
+- Returns: `{ baseQuery, tellMeQuery, items, issueSummary?, summaryError?, sheetExport }` — Brave + Gemini; `sheetExport` is `{ appended: true }`, `{ appended: false, error }` on append failure, or `{ appended: false, skipped: true }` when Sheets env is not configured.
+
+### Google Sheets (optional)
+
+After a successful lookup, ComicInfo can **append one row** to a spreadsheet for eBay staging. Column names and order are defined in `src/lib/sheet-columns.ts` (row 1 is written automatically on first export if cell `A1` is empty).
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), enable **Google Sheets API** for your project.
+2. Create a **service account**, add a JSON key, and copy the entire JSON.
+3. Create a spreadsheet (e.g. `ComicInfo_eBay`) and **Share** it with the service account email (`…@….iam.gserviceaccount.com`) as **Editor**.
+4. Set `GOOGLE_SHEETS_SPREADSHEET_ID` (from the spreadsheet URL) and `GOOGLE_SHEETS_CREDENTIALS` (JSON string) in `.env.local` / Vercel. Optionally set `GOOGLE_SHEETS_TAB_NAME` if not using `Sheet1`.
 
 ## Deploy to Vercel
 
@@ -76,6 +85,7 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
    - `GEMINI_MODEL` (optional)
    - `COMIC_VINE_API_KEY` (optional)
    - `ComicInfo_Brave_Search` or `BRAVE_SEARCH_API_KEY` (for “Tell me about …” search after confirmation)
+   - `GOOGLE_SHEETS_SPREADSHEET_ID` and `GOOGLE_SHEETS_CREDENTIALS` (optional; appends staging rows after lookup)
 
 ## Notes
 

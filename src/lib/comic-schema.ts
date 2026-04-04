@@ -27,6 +27,8 @@ export const lookupRequestSchema = z.object({
   year: z.union([z.number(), z.string()]).nullable().optional(),
   month: z.string().nullable().optional(),
   volumeOrSeries: z.string().nullable().optional(),
+  /** Year from cover analysis before user override; used for Google Sheets export. */
+  yearIdentified: z.union([z.number(), z.string()]).nullable().optional(),
 });
 
 export type LookupRequest = z.infer<typeof lookupRequestSchema>;
