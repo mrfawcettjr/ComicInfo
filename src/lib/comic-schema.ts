@@ -41,11 +41,31 @@ export const issueSummarySchema = z.object({
     .array(z.string())
     .default([])
     .transform((names) => names.slice(0, 10)),
-  /** Notable moments: first appearances, deaths, major twists — snippets only. */
-  whatMadeSpecial: z
-    .string()
-    .default("")
-    .transform((s) => s.trim()),
+  /** Collector-focused angles derived from snippets only. */
+  whatMadeSpecial: z.object({
+    /** Debuts, deaths, surprise revelations, key origin beats for this issue. */
+    debutsRevelationsAndDeaths: z
+      .string()
+      .default("")
+      .transform((s) => s.trim()),
+    /** Pivotal scenes or beats for characters in this issue. */
+    significantCharacterMoments: z
+      .string()
+      .default("")
+      .transform((s) => s.trim()),
+    /** Why this issue matters in the run or mythos (snippets only). */
+    overallSignificance: z
+      .string()
+      .default("")
+      .transform((s) => s.trim()),
+    /** Rarity, keys, demand, or listing angles for collectors (no invented prices). */
+    collectorValue: z
+      .string()
+      .default("")
+      .transform((s) => s.trim()),
+  }),
 });
 
 export type IssueSummary = z.infer<typeof issueSummarySchema>;
+
+export type WhatMadeSpecialSection = IssueSummary["whatMadeSpecial"];

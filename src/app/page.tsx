@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ComicIdentification, IssueSummary } from "@/lib/comic-schema";
+import type {
+  ComicIdentification,
+  IssueSummary,
+  WhatMadeSpecialSection,
+} from "@/lib/comic-schema";
 import { compressImageForUpload } from "@/lib/compress-image";
 
 const MAX_IMAGES = 4;
@@ -44,6 +48,42 @@ function displayValue(value: string | number | null | undefined) {
     return "—";
   }
   return String(value);
+}
+
+function emptyWhatMadeSpecial(): WhatMadeSpecialSection {
+  return {
+    debutsRevelationsAndDeaths: "",
+    significantCharacterMoments: "",
+    overallSignificance: "",
+    collectorValue: "",
+  };
+}
+
+function normalizeWhatMadeSpecial(raw: unknown): WhatMadeSpecialSection {
+  if (typeof raw === "string") {
+    return { ...emptyWhatMadeSpecial(), debutsRevelationsAndDeaths: raw.trim() };
+  }
+  if (!raw || typeof raw !== "object") {
+    return emptyWhatMadeSpecial();
+  }
+  const o = raw as Record<string, unknown>;
+  const pick = (key: keyof WhatMadeSpecialSection) =>
+    typeof o[key] === "string" ? (o[key] as string).trim() : "";
+  return {
+    debutsRevelationsAndDeaths: pick("debutsRevelationsAndDeaths"),
+    significantCharacterMoments: pick("significantCharacterMoments"),
+    overallSignificance: pick("overallSignificance"),
+    collectorValue: pick("collectorValue"),
+  };
+}
+
+function isWhatMadeSpecialEmpty(section: WhatMadeSpecialSection) {
+  return (
+    !section.debutsRevelationsAndDeaths.trim() &&
+    !section.significantCharacterMoments.trim() &&
+    !section.overallSignificance.trim() &&
+    !section.collectorValue.trim()
+  );
 }
 
 export default function Home() {
@@ -230,15 +270,12 @@ export default function Home() {
               .filter((n): n is string => typeof n === "string")
               .slice(0, 10)
           : [];
-        const rawSpecial = body.issueSummary.whatMadeSpecial;
-        const whatMadeSpecial =
-          typeof rawSpecial === "string" ? rawSpecial.trim() : "";
         setLookupIssueSummary({
           keyFeatures: body.issueSummary.keyFeatures,
           stories: body.issueSummary.stories,
           caveat: body.issueSummary.caveat ?? null,
           keyCharacters,
-          whatMadeSpecial,
+          whatMadeSpecial: normalizeWhatMadeSpecial(body.issueSummary.whatMadeSpecial),
         });
       } else {
         setLookupIssueSummary(null);
@@ -470,18 +507,56 @@ export default function Home() {
                       </ul>
                     </div>
                   ) : null}
-                  {lookupIssueSummary.whatMadeSpecial.trim() ? (
-                    <div>
-                      <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                        What made this issue special
-                      </h4>
-                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        First appearances, deaths, and major revelations when mentioned in search
-                        results for this issue.
-                      </p>
-                      <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
-                        {lookupIssueSummary.whatMadeSpecial}
+                  {!isWhatMadeSpecialEmpty(lookupIssueSummary.whatMadeSpecial) ? (
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          What made this issue special
+                        </h4>
+                        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                          From web snippets for this issue only — not investment advice.
+                        </p>
                       </div>
+                      {lookupIssueSummary.whatMadeSpecial.debutsRevelationsAndDeaths.trim() ? (
+                        <div>
+                          <h5 className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-400">
+                            First appearances, deaths & revelations
+                          </h5>
+                          <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+                            {lookupIssueSummary.whatMadeSpecial.debutsRevelationsAndDeaths}
+                          </div>
+                        </div>
+                      ) : null}
+                      {lookupIssueSummary.whatMadeSpecial.significantCharacterMoments.trim() ? (
+                        <div>
+                          <h5 className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-400">
+                            Significant character moments
+                          </h5>
+                          <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+                            {lookupIssueSummary.whatMadeSpecial.significantCharacterMoments}
+                          </div>
+                        </div>
+                      ) : null}
+                      {lookupIssueSummary.whatMadeSpecial.overallSignificance.trim() ? (
+                        <div>
+                          <h5 className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-400">
+                            Overall significance
+                          </h5>
+                          <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+                            {lookupIssueSummary.whatMadeSpecial.overallSignificance}
+                          </div>
+                        </div>
+                      ) : null}
+                      {lookupIssueSummary.whatMadeSpecial.collectorValue.trim() ? (
+                        <div>
+                          <h5 className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-400">
+                            Collector appeal
+                          </h5>
+                          <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+                            {lookupIssueSummary.whatMadeSpecial.collectorValue}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {lookupIssueSummary.keyFeatures.length > 0 ? (
@@ -513,7 +588,7 @@ export default function Home() {
                   ) : null}
                   {lookupIssueSummary.keyFeatures.length === 0 &&
                   lookupIssueSummary.keyCharacters.length === 0 &&
-                  !lookupIssueSummary.whatMadeSpecial.trim() &&
+                  isWhatMadeSpecialEmpty(lookupIssueSummary.whatMadeSpecial) &&
                   !lookupIssueSummary.stories.trim() &&
                   !lookupIssueSummary.caveat?.trim() ? (
                     <p className="text-sm text-zinc-600 dark:text-zinc-400">
