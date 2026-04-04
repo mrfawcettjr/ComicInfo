@@ -224,10 +224,17 @@ export default function Home() {
         Array.isArray(body.issueSummary.keyFeatures) &&
         typeof body.issueSummary.stories === "string"
       ) {
+        const rawChars = body.issueSummary.keyCharacters;
+        const keyCharacters = Array.isArray(rawChars)
+          ? rawChars
+              .filter((n): n is string => typeof n === "string")
+              .slice(0, 10)
+          : [];
         setLookupIssueSummary({
           keyFeatures: body.issueSummary.keyFeatures,
           stories: body.issueSummary.stories,
           caveat: body.issueSummary.caveat ?? null,
+          keyCharacters,
         });
       } else {
         setLookupIssueSummary(null);
@@ -253,8 +260,8 @@ export default function Home() {
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Images are compressed in your browser (≤ 1 MB each) before upload. Identification uses
           Google Gemini. After you confirm, we search with Brave, then Gemini summarizes key
-          features and stories for that issue only (Brave: JSON API, not HTML scraping). Do not
-          upload sensitive images.
+          features, key characters (up to 10), and stories for that issue only (Brave: JSON API,
+          not HTML scraping). Do not upload sensitive images.
         </p>
       </section>
 
@@ -438,9 +445,26 @@ export default function Home() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">This issue</h3>
                   <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                    Key features and stories for this issue only (other issues and series are
-                    filtered out when possible).
+                    Key features, characters, and stories for this issue only (other issues and
+                    series are filtered out when possible).
                   </p>
+                  {lookupIssueSummary.keyCharacters.length > 0 ? (
+                    <div>
+                      <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        Key characters
+                      </h4>
+                      <ul className="mt-2 flex flex-wrap gap-2">
+                        {lookupIssueSummary.keyCharacters.map((name, i) => (
+                          <li
+                            key={`${name}-${i}`}
+                            className="rounded-full border border-zinc-300 bg-zinc-50 px-3 py-1 text-sm text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800/50 dark:text-zinc-200"
+                          >
+                            {name}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   {lookupIssueSummary.keyFeatures.length > 0 ? (
                     <div>
                       <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -469,6 +493,7 @@ export default function Home() {
                     </p>
                   ) : null}
                   {lookupIssueSummary.keyFeatures.length === 0 &&
+                  lookupIssueSummary.keyCharacters.length === 0 &&
                   !lookupIssueSummary.stories.trim() &&
                   !lookupIssueSummary.caveat?.trim() ? (
                     <p className="text-sm text-zinc-600 dark:text-zinc-400">

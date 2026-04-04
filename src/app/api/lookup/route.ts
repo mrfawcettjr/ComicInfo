@@ -182,8 +182,12 @@ const issueSummaryResponseSchema: ObjectSchema = {
     },
     stories: { type: SchemaType.STRING },
     caveat: { type: SchemaType.STRING, nullable: true },
+    keyCharacters: {
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING },
+    },
   },
-  required: ["keyFeatures", "stories", "caveat"],
+  required: ["keyFeatures", "stories", "caveat", "keyCharacters"],
 };
 
 function buildSummarizerPrompt(identityBlock: string, evidenceBlock: string) {
@@ -199,9 +203,10 @@ function buildSummarizerPrompt(identityBlock: string, evidenceBlock: string) {
     "Rules:",
     "1. Produce keyFeatures: 3–8 short bullet strings for THIS issue only — notable creators, villains, guest stars, story arc name, key plot hooks, or format (e.g. anniversary issue) when the snippets clearly refer to this issue.",
     "2. Produce stories: 1–3 short paragraphs describing plot/story content for THIS issue only. If snippets mix multiple issues, include only what matches the TARGET issue; if you cannot isolate it, write minimal text and explain in caveat.",
-    "3. Ignore or discard information about other issue numbers, other volumes, collections, omnibuses, or unrelated series with similar names.",
-    "4. Do not invent facts not supported by the snippets. If evidence is too thin for this exact issue, use empty keyFeatures and a brief stories paragraph saying so, and set caveat to explain.",
-    "5. caveat: null if confident; otherwise a brief note (e.g. snippets mostly referred to another issue).",
+    "3. Produce keyCharacters: 0–10 character names (heroes, villains, supporting) clearly tied to THIS issue in the snippets — use common names (e.g. 'Spider-Man' not only 'Peter Parker' unless the snippet emphasizes it). No duplicates; empty array if none can be confirmed from snippets.",
+    "4. Ignore or discard information about other issue numbers, other volumes, collections, omnibuses, or unrelated series with similar names.",
+    "5. Do not invent facts not supported by the snippets. If evidence is too thin for this exact issue, use empty keyFeatures and a brief stories paragraph saying so, and set caveat to explain.",
+    "6. caveat: null if confident; otherwise a brief note (e.g. snippets mostly referred to another issue).",
     "",
     "Return JSON only matching the schema.",
   ].join("\n");

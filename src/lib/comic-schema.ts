@@ -36,6 +36,11 @@ export const issueSummarySchema = z.object({
   keyFeatures: z.array(z.string()),
   stories: z.string(),
   caveat: z.string().nullable().optional(),
+  /** Up to 10 named characters appearing in this issue (from snippets only). */
+  keyCharacters: z
+    .array(z.string())
+    .default([])
+    .transform((names) => names.slice(0, 10)),
 });
 
 export type IssueSummary = z.infer<typeof issueSummarySchema>;
