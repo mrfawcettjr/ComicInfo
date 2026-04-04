@@ -41,6 +41,11 @@ export const issueSummarySchema = z.object({
     .array(z.string())
     .default([])
     .transform((names) => names.slice(0, 10)),
+  /** Notable moments: first appearances, deaths, major twists — snippets only. */
+  whatMadeSpecial: z
+    .string()
+    .default("")
+    .transform((s) => s.trim()),
 });
 
 export type IssueSummary = z.infer<typeof issueSummarySchema>;

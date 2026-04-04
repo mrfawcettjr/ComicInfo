@@ -230,11 +230,15 @@ export default function Home() {
               .filter((n): n is string => typeof n === "string")
               .slice(0, 10)
           : [];
+        const rawSpecial = body.issueSummary.whatMadeSpecial;
+        const whatMadeSpecial =
+          typeof rawSpecial === "string" ? rawSpecial.trim() : "";
         setLookupIssueSummary({
           keyFeatures: body.issueSummary.keyFeatures,
           stories: body.issueSummary.stories,
           caveat: body.issueSummary.caveat ?? null,
           keyCharacters,
+          whatMadeSpecial,
         });
       } else {
         setLookupIssueSummary(null);
@@ -260,7 +264,8 @@ export default function Home() {
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Images are compressed in your browser (≤ 1 MB each) before upload. Identification uses
           Google Gemini. After you confirm, we search with Brave, then Gemini summarizes key
-          features, key characters (up to 10), and stories for that issue only (Brave: JSON API,
+          features, key characters (up to 10), “what made this issue special,” and stories for that
+          issue only (Brave: JSON API,
           not HTML scraping). Do not upload sensitive images.
         </p>
       </section>
@@ -445,8 +450,8 @@ export default function Home() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">This issue</h3>
                   <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                    Key features, characters, and stories for this issue only (other issues and
-                    series are filtered out when possible).
+                    Key features, characters, collector moments, and stories for this issue only
+                    (other issues and series are filtered out when possible).
                   </p>
                   {lookupIssueSummary.keyCharacters.length > 0 ? (
                     <div>
@@ -463,6 +468,20 @@ export default function Home() {
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  ) : null}
+                  {lookupIssueSummary.whatMadeSpecial.trim() ? (
+                    <div>
+                      <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        What made this issue special
+                      </h4>
+                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        First appearances, deaths, and major revelations when mentioned in search
+                        results for this issue.
+                      </p>
+                      <div className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+                        {lookupIssueSummary.whatMadeSpecial}
+                      </div>
                     </div>
                   ) : null}
                   {lookupIssueSummary.keyFeatures.length > 0 ? (
@@ -494,6 +513,7 @@ export default function Home() {
                   ) : null}
                   {lookupIssueSummary.keyFeatures.length === 0 &&
                   lookupIssueSummary.keyCharacters.length === 0 &&
+                  !lookupIssueSummary.whatMadeSpecial.trim() &&
                   !lookupIssueSummary.stories.trim() &&
                   !lookupIssueSummary.caveat?.trim() ? (
                     <p className="text-sm text-zinc-600 dark:text-zinc-400">
