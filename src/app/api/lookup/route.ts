@@ -332,6 +332,7 @@ export async function POST(request: Request) {
       }
     }
 
+    // Rows are appended only via POST /api/sheet-export (user clicks “Add row to Google Sheet”).
     return Response.json({
       baseQuery,
       tellMeQuery,
