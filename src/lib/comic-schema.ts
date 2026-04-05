@@ -71,3 +71,12 @@ export const issueSummarySchema = z.object({
 export type IssueSummary = z.infer<typeof issueSummarySchema>;
 
 export type WhatMadeSpecialSection = IssueSummary["whatMadeSpecial"];
+
+/** Manual Google Sheets row append (same columns as `buildComicInfoSheetRowValues`). */
+export const sheetExportRequestSchema = lookupRequestSchema.extend({
+  baseQuery: z.string().min(1),
+  tellMeQuery: z.string().min(1),
+  issueSummary: issueSummarySchema.nullable(),
+});
+
+export type SheetExportRequest = z.infer<typeof sheetExportRequestSchema>;

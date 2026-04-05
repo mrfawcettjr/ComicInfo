@@ -6,10 +6,7 @@ import {
   type IssueSummary,
   type LookupRequest,
 } from "@/lib/comic-schema";
-import {
-  appendComicInfoRowToGoogleSheet,
-  isGoogleSheetsExportConfigured,
-} from "@/lib/google-sheets-export";
+import { isGoogleSheetsExportConfigured } from "@/lib/google-sheets-export";
 import { extractJsonFromModelOutput } from "@/lib/extract-model-json";
 
 export const runtime = "nodejs";
@@ -335,39 +332,12 @@ export async function POST(request: Request) {
       }
     }
 
-    let sheetExport:
-      | { appended: true }
-      | { appended: false; error: string }
-      | { appended: false; skipped: true };
-    if (isGoogleSheetsExportConfigured()) {
-      try {
-        await appendComicInfoRowToGoogleSheet({
-          lookup: body,
-          yearIdentified: body.yearIdentified,
-          baseQuery,
-          tellMeQuery,
-          issueSummary,
-        });
-        sheetExport = { appended: true };
-      } catch (sheetErr) {
-        sheetExport = {
-          appended: false,
-          error:
-            sheetErr instanceof Error
-              ? sheetErr.message
-              : "Google Sheets export failed.",
-        };
-      }
-    } else {
-      sheetExport = { appended: false, skipped: true };
-    }
-
     return Response.json({
       baseQuery,
       tellMeQuery,
       items,
       issueSummary,
-      sheetExport,
+      googleSheetsExportAvailable: isGoogleSheetsExportConfigured(),
       ...(summaryError ? { summaryError } : {}),
     });
   } catch (err) {

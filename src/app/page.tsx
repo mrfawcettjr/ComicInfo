@@ -123,10 +123,13 @@ export default function Home() {
   const [lookupSummaryError, setLookupSummaryError] = useState<string | null>(
     null,
   );
-  const [lookupSheetExport, setLookupSheetExport] = useState<{
-    appended: boolean;
-    error?: string;
-  } | null>(null);
+  const [lookupTellMeQuery, setLookupTellMeQuery] = useState<string | null>(null);
+  const [googleSheetsExportAvailable, setGoogleSheetsExportAvailable] =
+    useState(false);
+  const [sheetExportLoading, setSheetExportLoading] = useState(false);
+  const [sheetExportFeedback, setSheetExportFeedback] = useState<
+    { kind: "success" } | { kind: "error"; message: string } | null
+  >(null);
   /** Editable year before lookup; synced from `result` when analysis completes. */
   const [yearDraft, setYearDraft] = useState("");
 
@@ -171,9 +174,11 @@ export default function Home() {
     setConfirmed(false);
     setLookupError(null);
     setLookupBaseQuery(null);
+    setLookupTellMeQuery(null);
+    setGoogleSheetsExportAvailable(false);
+    setSheetExportFeedback(null);
     setLookupIssueSummary(null);
     setLookupSummaryError(null);
-    setLookupSheetExport(null);
   }
 
   async function analyze() {
@@ -252,7 +257,9 @@ export default function Home() {
     setLookupIssueSummary(null);
     setLookupSummaryError(null);
     setLookupBaseQuery(null);
-    setLookupSheetExport(null);
+    setLookupTellMeQuery(null);
+    setGoogleSheetsExportAvailable(false);
+    setSheetExportFeedback(null);
 
     try {
       const response = await fetch("/api/lookup", {
@@ -282,9 +289,10 @@ export default function Home() {
 
       const body = payload as {
         baseQuery?: string;
+        tellMeQuery?: string;
         issueSummary?: IssueSummary | null;
         summaryError?: string;
-        sheetExport?: { appended?: boolean; error?: string };
+        googleSheetsExportAvailable?: boolean;
         error?: string;
         details?: string;
       };
@@ -299,23 +307,13 @@ export default function Home() {
       setLookupBaseQuery(
         typeof body.baseQuery === "string" ? body.baseQuery : null,
       );
-      if (body.sheetExport && typeof body.sheetExport === "object") {
-        const se = body.sheetExport as {
-          appended?: boolean;
-          error?: string;
-          skipped?: boolean;
-        };
-        if (se.skipped) {
-          setLookupSheetExport(null);
-        } else {
-          setLookupSheetExport({
-            appended: Boolean(se.appended),
-            error: typeof se.error === "string" ? se.error : undefined,
-          });
-        }
-      } else {
-        setLookupSheetExport(null);
-      }
+      setLookupTellMeQuery(
+        typeof body.tellMeQuery === "string" ? body.tellMeQuery : null,
+      );
+      setGoogleSheetsExportAvailable(
+        body.googleSheetsExportAvailable === true,
+      );
+      setSheetExportFeedback(null);
       setLookupSummaryError(
         typeof body.summaryError === "string" ? body.summaryError : null,
       );
@@ -347,6 +345,68 @@ export default function Home() {
       );
     } finally {
       setLookupLoading(false);
+    }
+  }
+
+  async function sendToGoogleSheet() {
+    if (!result || lookupBaseQuery === null || lookupTellMeQuery === null) {
+      return;
+    }
+
+    const yearParsed = parseYearForLookup(yearDraft, result.year);
+    if (!yearParsed.ok) {
+      setSheetExportFeedback({ kind: "error", message: yearParsed.message });
+      return;
+    }
+
+    setSheetExportLoading(true);
+    setSheetExportFeedback(null);
+
+    try {
+      const response = await fetch("/api/sheet-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: result.title,
+          issueNumber: result.issueNumber,
+          year: yearParsed.year,
+          month: result.month,
+          volumeOrSeries: result.volumeOrSeries,
+          yearIdentified: result.year,
+          baseQuery: lookupBaseQuery,
+          tellMeQuery: lookupTellMeQuery,
+          issueSummary: lookupIssueSummary,
+        }),
+      });
+
+      const text = await response.text();
+      let data: unknown;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(
+          response.ok
+            ? "Invalid response from sheet export."
+            : `Sheet export failed (${response.status}).`,
+        );
+      }
+
+      const errBody = data as { error?: string; ok?: boolean };
+      if (!response.ok) {
+        throw new Error(
+          errBody.error ?? `Sheet export failed (${response.status}).`,
+        );
+      }
+
+      setSheetExportFeedback({ kind: "success" });
+    } catch (exportErr) {
+      setSheetExportFeedback({
+        kind: "error",
+        message:
+          exportErr instanceof Error ? exportErr.message : "Sheet export failed.",
+      });
+    } finally {
+      setSheetExportLoading(false);
     }
   }
 
@@ -548,25 +608,41 @@ export default function Home() {
 
           {confirmed &&
             !lookupError &&
-            lookupSheetExport?.appended && (
-              <div
-                className="rounded border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
-                role="status"
-              >
-                Row appended to your Google Sheet (eBay staging columns).
-              </div>
-            )}
-
-          {confirmed &&
-            !lookupError &&
-            lookupSheetExport &&
-            !lookupSheetExport.appended &&
-            lookupSheetExport.error && (
-              <div
-                className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-                role="status"
-              >
-                Google Sheets export failed: {lookupSheetExport.error}
+            lookupBaseQuery !== null &&
+            lookupTellMeQuery !== null &&
+            googleSheetsExportAvailable && (
+              <div className="space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Google Sheet
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Append this lookup as one row to your ComicInfo staging sheet (same columns as
+                  the export script).
+                </p>
+                <button
+                  type="button"
+                  onClick={sendToGoogleSheet}
+                  disabled={sheetExportLoading}
+                  className="cursor-pointer rounded border border-zinc-400 bg-white px-4 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-500 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                >
+                  {sheetExportLoading ? "Adding row…" : "Add row to Google Sheet"}
+                </button>
+                {sheetExportFeedback?.kind === "success" ? (
+                  <p
+                    className="text-sm text-emerald-800 dark:text-emerald-300"
+                    role="status"
+                  >
+                    Row added to your spreadsheet.
+                  </p>
+                ) : null}
+                {sheetExportFeedback?.kind === "error" ? (
+                  <p
+                    className="text-sm text-amber-800 dark:text-amber-200"
+                    role="status"
+                  >
+                    {sheetExportFeedback.message}
+                  </p>
+                ) : null}
               </div>
             )}
 

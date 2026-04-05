@@ -65,11 +65,17 @@ It is designed to run locally on a MacBook Pro and deploy to Vercel.
 ### `POST /api/lookup`
 
 - Body: JSON `{ title?, issueNumber?, year?, month?, volumeOrSeries?, yearIdentified? }` — `yearIdentified` is the analyzed year before user override (used for the Google Sheet `year_identified` column).
-- Returns: `{ baseQuery, tellMeQuery, items, issueSummary?, summaryError?, sheetExport }` — Brave + Gemini; `sheetExport` is `{ appended: true }`, `{ appended: false, error }` on append failure, or `{ appended: false, skipped: true }` when Sheets env is not configured.
+- Returns: `{ baseQuery, tellMeQuery, items, issueSummary?, summaryError?, googleSheetsExportAvailable }` — Brave + Gemini; `googleSheetsExportAvailable` is `true` when Google Sheets env vars are set so the UI can offer “Add row to Google Sheet”.
+
+### `POST /api/sheet-export`
+
+- Body: JSON matching `sheetExportRequestSchema` — same fields as lookup (`title`, `issueNumber`, `year`, `month`, `volumeOrSeries`, `yearIdentified`) plus `baseQuery`, `tellMeQuery`, and `issueSummary` (nullable).
+- Returns: `{ ok: true }` or `{ error }` (503 if Sheets not configured on the server).
+- Appends **one row** using columns in `src/lib/sheet-columns.ts` (header row is written on first export if `A1` is empty).
 
 ### Google Sheets (optional)
 
-After a successful lookup, ComicInfo can **append one row** to a spreadsheet for eBay staging. Column names and order are defined in `src/lib/sheet-columns.ts` (row 1 is written automatically on first export if cell `A1` is empty).
+Use the **Add row to Google Sheet** button after a successful lookup, or call `POST /api/sheet-export` with the same payload. Column names and order are defined in `src/lib/sheet-columns.ts`.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), enable **Google Sheets API** for your project.
 2. Create a **service account**, add a JSON key, and copy the entire JSON.
