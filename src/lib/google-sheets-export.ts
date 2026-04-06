@@ -22,10 +22,6 @@ function cellString(value: string | number | null | undefined) {
   return String(value);
 }
 
-function joinPipe(items: string[]) {
-  return items.filter((s) => s.trim().length > 0).join(" | ");
-}
-
 export function buildComicInfoSheetRowValues(input: {
   rowId: string;
   createdAtIso: string;
@@ -35,57 +31,19 @@ export function buildComicInfoSheetRowValues(input: {
   tellMeQuery: string;
   issueSummary: IssueSummary | null;
 }): string[] {
-  const { lookup, issueSummary } = input;
+  const { lookup } = input;
   const yf = lookup.year;
   const yearForLookup =
     yf !== null && yf !== undefined && yf !== "" ? String(yf) : "";
-  const yi = input.yearIdentified;
-  const yearIdentified =
-    yi !== null && yi !== undefined && yi !== "" ? String(yi) : "";
 
-  const summary = issueSummary;
-  const w = summary?.whatMadeSpecial;
-
-  const issueSummaryJson = summary
-    ? JSON.stringify(summary)
-    : "";
-
+  // Minimal debug export: short, high-signal columns only.
   return [
     input.rowId,
     input.createdAtIso,
-    input.createdAtIso,
-    "comicinfo",
-    "draft",
-    "",
-    "",
-    "",
-    "",
     cellString(lookup.title),
     cellString(lookup.issueNumber),
-    cellString(lookup.volumeOrSeries),
-    cellString(lookup.month),
-    yearIdentified,
     yearForLookup,
-    summary ? joinPipe(summary.keyFeatures) : "",
-    summary ? joinPipe(summary.keyCharacters) : "",
-    summary ? summary.stories : "",
-    summary?.caveat != null ? String(summary.caveat) : "",
-    w?.debutsRevelationsAndDeaths ?? "",
-    w?.significantCharacterMoments ?? "",
-    w?.overallSignificance ?? "",
-    w?.collectorValue ?? "",
-    issueSummaryJson,
-    input.tellMeQuery,
     input.baseQuery,
-    "",
-    "",
-    "",
-    "",
-    "1",
-    "USD",
-    "",
-    "",
-    "",
   ];
 }
 
@@ -137,7 +95,7 @@ async function ensureHeaderRow(
   });
 }
 
-/** 1-based column index → A, B, …, Z, AA, … */
+/** 1-based column index -> A, B, ..., Z, AA, ... */
 function columnNumberToLetters(oneBasedIndex: number) {
   let n = oneBasedIndex;
   let s = "";
