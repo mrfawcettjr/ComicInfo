@@ -329,12 +329,18 @@ export default function Home() {
               .filter((n): n is string => typeof n === "string")
               .slice(0, 10)
           : [];
+        const raw = body.issueSummary as Record<string, unknown>;
+        const str = (k: string) =>
+          typeof raw[k] === "string" ? (raw[k] as string).trim() : "";
         setLookupIssueSummary({
           keyFeatures: body.issueSummary.keyFeatures,
           stories: body.issueSummary.stories,
           caveat: body.issueSummary.caveat ?? null,
           keyCharacters,
           whatMadeSpecial: normalizeWhatMadeSpecial(body.issueSummary.whatMadeSpecial),
+          physicalCondition: str("physicalCondition"),
+          conditionNotes: str("conditionNotes"),
+          cgcGradeRange: str("cgcGradeRange"),
         });
       } else {
         setLookupIssueSummary(null);
@@ -422,8 +428,9 @@ export default function Home() {
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Images are compressed in your browser (≤ 1 MB each) before upload. Identification uses
           Google Gemini. After you confirm, we search with Brave, then Gemini summarizes key
-          features, key characters (up to 10), “what made this issue special,” and stories for that
-          issue only (Brave: JSON API,
+          features, key characters (up to 10), “what made this issue special,” optional condition /
+          CGC-grade hints from listings when snippets mention them, and stories for that issue only
+          (Brave: JSON API,
           not HTML scraping). Do not upload sensitive images.
         </p>
       </section>
@@ -671,6 +678,41 @@ export default function Home() {
                     Key features, characters, collector moments, and stories for this issue only
                     (other issues and series are filtered out when possible).
                   </p>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50/80 p-4 dark:border-zinc-600 dark:bg-zinc-900/40">
+                    <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      Condition (from web snippets)
+                    </h4>
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Not a visual grade of your photos - only what listings or articles in the
+                      search results support.
+                    </p>
+                    <dl className="mt-3 grid gap-3 text-sm md:grid-cols-3">
+                      <div>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          Overall
+                        </dt>
+                        <dd className="mt-1 text-zinc-800 dark:text-zinc-200">
+                          {displayValue(lookupIssueSummary.physicalCondition)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          Est. CGC range
+                        </dt>
+                        <dd className="mt-1 font-mono text-zinc-800 dark:text-zinc-200">
+                          {displayValue(lookupIssueSummary.cgcGradeRange)}
+                        </dd>
+                      </div>
+                      <div className="md:col-span-3">
+                        <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          Notes
+                        </dt>
+                        <dd className="mt-1 whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+                          {displayValue(lookupIssueSummary.conditionNotes)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
                   {lookupIssueSummary.keyCharacters.length > 0 ? (
                     <div>
                       <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -771,7 +813,10 @@ export default function Home() {
                   lookupIssueSummary.keyCharacters.length === 0 &&
                   isWhatMadeSpecialEmpty(lookupIssueSummary.whatMadeSpecial) &&
                   !lookupIssueSummary.stories.trim() &&
-                  !lookupIssueSummary.caveat?.trim() ? (
+                  !lookupIssueSummary.caveat?.trim() &&
+                  !lookupIssueSummary.physicalCondition.trim() &&
+                  !lookupIssueSummary.conditionNotes.trim() &&
+                  !lookupIssueSummary.cgcGradeRange.trim() ? (
                     <p className="text-sm text-zinc-600 dark:text-zinc-400">
                       No summary lines were returned for this issue. Try a clearer cover photo or
                       analyze again.

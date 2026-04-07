@@ -202,8 +202,20 @@ const issueSummaryResponseSchema: ObjectSchema = {
         "collectorValue",
       ],
     },
+    physicalCondition: { type: SchemaType.STRING },
+    conditionNotes: { type: SchemaType.STRING },
+    cgcGradeRange: { type: SchemaType.STRING },
   },
-  required: ["keyFeatures", "stories", "caveat", "keyCharacters", "whatMadeSpecial"],
+  required: [
+    "keyFeatures",
+    "stories",
+    "caveat",
+    "keyCharacters",
+    "whatMadeSpecial",
+    "physicalCondition",
+    "conditionNotes",
+    "cgcGradeRange",
+  ],
 };
 
 function buildSummarizerPrompt(identityBlock: string, evidenceBlock: string) {
@@ -228,6 +240,10 @@ function buildSummarizerPrompt(identityBlock: string, evidenceBlock: string) {
     "5. Ignore or discard information about other issue numbers, other volumes, collections, omnibuses, or unrelated series with similar names.",
     "6. Do not invent facts not supported by the snippets. If evidence is too thin for this exact issue, use empty keyFeatures and a brief stories paragraph saying so, and set caveat to explain.",
     "7. caveat: null if confident; otherwise a brief note (e.g. snippets mostly referred to another issue).",
+    "8. Condition & grade (from WEB SNIPPETS only — you do not see the user's photos):",
+    "   physicalCondition — short overall label when listing text supports it (e.g. Good, Very Good, Fine, Very Fine, Near Mint, or abbreviated G, VG, FN, VF, NM). Use \"\" when snippets do not clearly state or imply overall condition.",
+    "   conditionNotes — brief notes on wear, defects, restoration, pressing, or seller grading language found in snippets. Use \"\" when there is nothing relevant.",
+    "   cgcGradeRange — a CGC-style numeric RANGE as \"low to high\" with one decimal each (e.g. \"7.0 to 8.0\") ONLY when snippets justify a narrow band (e.g. explicit grade, strong auction description). Use \"\" when unsupported. Do not invent grades, slab results, or census data.",
     "",
     "Return JSON only matching the schema.",
   ].join("\n");

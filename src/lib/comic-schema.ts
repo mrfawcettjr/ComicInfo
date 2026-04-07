@@ -66,6 +66,23 @@ export const issueSummarySchema = z.object({
       .default("")
       .transform((s) => s.trim()),
   }),
+  /**
+   * CGC-style labels from web snippets only (same Gemini call as the rest of the summary).
+   * Empty when snippets do not support condition or grade.
+   */
+  physicalCondition: z
+    .string()
+    .default("")
+    .transform((s) => s.trim()),
+  conditionNotes: z
+    .string()
+    .default("")
+    .transform((s) => s.trim()),
+  /** e.g. "7.0 to 8.0" — estimate from snippet evidence only. */
+  cgcGradeRange: z
+    .string()
+    .default("")
+    .transform((s) => s.trim()),
 });
 
 export type IssueSummary = z.infer<typeof issueSummarySchema>;
