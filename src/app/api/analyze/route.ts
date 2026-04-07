@@ -31,7 +31,7 @@ function isSupportedMimeType(type: string) {
 
 function buildPrompt() {
   return [
-    "You are reading comic book cover photos (up to four images). Extract only identifying metadata.",
+    "You are reading comic book cover photos (up to four images). Extract identifying metadata and a photo-based condition estimate.",
     "Use only details visible in the images. Do not guess.",
     "Return a JSON object with exactly these fields:",
     "title (string or null): comic or series name as shown on the cover.",
@@ -39,7 +39,11 @@ function buildPrompt() {
     "year (number or null): publication year if visible (cover date, copyright, or indicia).",
     "month (string or null): publication month if visible; use full month name (January, February, ...).",
     "volumeOrSeries (string or null): volume number, series label, or series name if visible (e.g. 'Vol. 2', 'Amazing Spider-Man').",
-    "If something is not visible or uncertain, set it to null.",
+    'physicalCondition (string): short overall label from visible wear only (e.g. "Good", "Very Good", "Fine", "Very Fine", "Near Mint"). Use "" when unclear.',
+    'conditionNotes (string): brief notes on visible defects or positives (spine ticks, creases, tears, stains, gloss, corner blunting, writing, restoration signs). Use "" when none can be supported.',
+    'cgcGradeRange (string): CGC-style range from photo evidence only in format "x.x to y.y" (one decimal each, low <= high), e.g. "7.0 to 8.0". Use "" when uncertain.',
+    "If title/issue/year/month/volume is not visible or uncertain, set that field to null.",
+    "Never claim slab/census verification from a raw photo.",
   ].join(" ");
 }
 
@@ -51,8 +55,20 @@ const comicResponseSchema: ObjectSchema = {
     year: { type: SchemaType.INTEGER, nullable: true },
     month: { type: SchemaType.STRING, nullable: true },
     volumeOrSeries: { type: SchemaType.STRING, nullable: true },
+    physicalCondition: { type: SchemaType.STRING },
+    conditionNotes: { type: SchemaType.STRING },
+    cgcGradeRange: { type: SchemaType.STRING },
   },
-  required: ["title", "issueNumber", "year", "month", "volumeOrSeries"],
+  required: [
+    "title",
+    "issueNumber",
+    "year",
+    "month",
+    "volumeOrSeries",
+    "physicalCondition",
+    "conditionNotes",
+    "cgcGradeRange",
+  ],
 };
 
 async function normalizeImage(file: File) {

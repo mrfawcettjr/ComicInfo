@@ -1,5 +1,21 @@
 import { z } from "zod";
 
+export const conditionAssessmentSchema = z.object({
+  physicalCondition: z
+    .string()
+    .default("")
+    .transform((s) => s.trim()),
+  conditionNotes: z
+    .string()
+    .default("")
+    .transform((s) => s.trim()),
+  /** e.g. "7.0 to 8.0" */
+  cgcGradeRange: z
+    .string()
+    .default("")
+    .transform((s) => s.trim()),
+});
+
 /** Identifying metadata extracted from cover images (and optional Comic Vine enrichment). */
 export const comicIdentificationSchema = z.object({
   title: z.string().nullable(),
@@ -17,9 +33,10 @@ export const comicIdentificationSchema = z.object({
   month: z.string().nullable(),
   /** Series title, volume label, or "Vol. N" if visible on the cover or indicia. */
   volumeOrSeries: z.string().nullable(),
-});
+}).extend(conditionAssessmentSchema.shape);
 
 export type ComicIdentification = z.infer<typeof comicIdentificationSchema>;
+export type ConditionAssessment = z.infer<typeof conditionAssessmentSchema>;
 
 export const lookupRequestSchema = z.object({
   title: z.string().nullable().optional(),
@@ -29,6 +46,8 @@ export const lookupRequestSchema = z.object({
   volumeOrSeries: z.string().nullable().optional(),
   /** Year from cover analysis before user override; used for Google Sheets export. */
   yearIdentified: z.union([z.number(), z.string()]).nullable().optional(),
+  /** Photo-derived condition estimate from /api/analyze (optional). */
+  photoConditionAssessment: conditionAssessmentSchema.optional(),
 });
 
 export type LookupRequest = z.infer<typeof lookupRequestSchema>;
@@ -70,19 +89,10 @@ export const issueSummarySchema = z.object({
    * CGC-style labels from web snippets only (same Gemini call as the rest of the summary).
    * Empty when snippets do not support condition or grade.
    */
-  physicalCondition: z
-    .string()
-    .default("")
-    .transform((s) => s.trim()),
-  conditionNotes: z
-    .string()
-    .default("")
-    .transform((s) => s.trim()),
-  /** e.g. "7.0 to 8.0" — estimate from snippet evidence only. */
-  cgcGradeRange: z
-    .string()
-    .default("")
-    .transform((s) => s.trim()),
+  physicalCondition: conditionAssessmentSchema.shape.physicalCondition,
+  conditionNotes: conditionAssessmentSchema.shape.conditionNotes,
+  /** e.g. "7.0 to 8.0" — estimate from photos + snippet evidence. */
+  cgcGradeRange: conditionAssessmentSchema.shape.cgcGradeRange,
 });
 
 export type IssueSummary = z.infer<typeof issueSummarySchema>;

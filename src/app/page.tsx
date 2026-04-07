@@ -272,6 +272,11 @@ export default function Home() {
           month: result.month,
           volumeOrSeries: result.volumeOrSeries,
           yearIdentified: result.year,
+          photoConditionAssessment: {
+            physicalCondition: result.physicalCondition ?? "",
+            conditionNotes: result.conditionNotes ?? "",
+            cgcGradeRange: result.cgcGradeRange ?? "",
+          },
         }),
       });
 
@@ -332,15 +337,18 @@ export default function Home() {
         const raw = body.issueSummary as Record<string, unknown>;
         const str = (k: string) =>
           typeof raw[k] === "string" ? (raw[k] as string).trim() : "";
+        const fallbackPhysical = (result.physicalCondition ?? "").trim();
+        const fallbackNotes = (result.conditionNotes ?? "").trim();
+        const fallbackRange = (result.cgcGradeRange ?? "").trim();
         setLookupIssueSummary({
           keyFeatures: body.issueSummary.keyFeatures,
           stories: body.issueSummary.stories,
           caveat: body.issueSummary.caveat ?? null,
           keyCharacters,
           whatMadeSpecial: normalizeWhatMadeSpecial(body.issueSummary.whatMadeSpecial),
-          physicalCondition: str("physicalCondition"),
-          conditionNotes: str("conditionNotes"),
-          cgcGradeRange: str("cgcGradeRange"),
+          physicalCondition: str("physicalCondition") || fallbackPhysical,
+          conditionNotes: str("conditionNotes") || fallbackNotes,
+          cgcGradeRange: str("cgcGradeRange") || fallbackRange,
         });
       } else {
         setLookupIssueSummary(null);
@@ -680,11 +688,10 @@ export default function Home() {
                   </p>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50/80 p-4 dark:border-zinc-600 dark:bg-zinc-900/40">
                     <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                      Condition (from web snippets)
+                      Condition (photo + web evidence)
                     </h4>
                     <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      Not a visual grade of your photos - only what listings or articles in the
-                      search results support.
+                      Primarily from your uploaded photos, with web snippet context when useful.
                     </p>
                     <dl className="mt-3 grid gap-3 text-sm md:grid-cols-3">
                       <div>

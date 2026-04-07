@@ -3,6 +3,7 @@ import { GoogleGenerativeAI, SchemaType, type ObjectSchema } from "@google/gener
 import {
   issueSummarySchema,
   lookupRequestSchema,
+  type ConditionAssessment,
   type IssueSummary,
   type LookupRequest,
 } from "@/lib/comic-schema";
@@ -218,7 +219,20 @@ const issueSummaryResponseSchema: ObjectSchema = {
   ],
 };
 
-function buildSummarizerPrompt(identityBlock: string, evidenceBlock: string) {
+function buildSummarizerPrompt(
+  identityBlock: string,
+  evidenceBlock: string,
+  photoConditionAssessment?: ConditionAssessment,
+) {
+  const photoConditionBlock = photoConditionAssessment
+    ? [
+        "PHOTO-BASED CONDITION INPUT (from earlier image analysis):",
+        `physicalCondition: ${photoConditionAssessment.physicalCondition || "(empty)"}`,
+        `conditionNotes: ${photoConditionAssessment.conditionNotes || "(empty)"}`,
+        `cgcGradeRange: ${photoConditionAssessment.cgcGradeRange || "(empty)"}`,
+      ].join("\n")
+    : "PHOTO-BASED CONDITION INPUT: (none)";
+
   return [
     "You summarize web search snippets for ONE comic book issue. The user photographed that issue; the identity below is the only issue you may describe.",
     "",
@@ -227,6 +241,8 @@ function buildSummarizerPrompt(identityBlock: string, evidenceBlock: string) {
     "",
     "WEB SNIPPETS (noisy; may mention other issues or series — you must filter):",
     evidenceBlock || "(No snippet text was retrieved.)",
+    "",
+    photoConditionBlock,
     "",
     "Rules:",
     "1. Produce keyFeatures: 3–8 short bullet strings for THIS issue only — notable creators, villains, guest stars, story arc name, key plot hooks, or format (e.g. anniversary issue) when the snippets clearly refer to this issue.",
@@ -240,10 +256,11 @@ function buildSummarizerPrompt(identityBlock: string, evidenceBlock: string) {
     "5. Ignore or discard information about other issue numbers, other volumes, collections, omnibuses, or unrelated series with similar names.",
     "6. Do not invent facts not supported by the snippets. If evidence is too thin for this exact issue, use empty keyFeatures and a brief stories paragraph saying so, and set caveat to explain.",
     "7. caveat: null if confident; otherwise a brief note (e.g. snippets mostly referred to another issue).",
-    "8. Condition & grade (from WEB SNIPPETS only — you do not see the user's photos):",
-    "   physicalCondition — short overall label when listing text supports it (e.g. Good, Very Good, Fine, Very Fine, Near Mint, or abbreviated G, VG, FN, VF, NM). Use \"\" when snippets do not clearly state or imply overall condition.",
-    "   conditionNotes — brief notes on wear, defects, restoration, pressing, or seller grading language found in snippets. Use \"\" when there is nothing relevant.",
-    "   cgcGradeRange — a CGC-style numeric RANGE as \"low to high\" with one decimal each (e.g. \"7.0 to 8.0\") ONLY when snippets justify a narrow band (e.g. explicit grade, strong auction description). Use \"\" when unsupported. Do not invent grades, slab results, or census data.",
+    "8. Condition & grade (combine the PHOTO-BASED CONDITION INPUT with snippet evidence):",
+    "   physicalCondition — short overall label (e.g. Good, Very Good, Fine, Very Fine, Near Mint). If photo input is present, prefer that unless snippets strongly contradict it.",
+    "   conditionNotes — concise rationale combining visible-photo notes with corroborating snippet notes when useful.",
+    "   cgcGradeRange — a CGC-style numeric RANGE as \"low to high\" with one decimal each (e.g. \"7.0 to 8.0\"). Use photo input when present; refine only when snippets add credible support. Use \"\" when still unsupported.",
+    "9. Do not invent slab certifications, third-party grades, or census data.",
     "",
     "Return JSON only matching the schema.",
   ].join("\n");
@@ -253,6 +270,7 @@ async function summarizeIssueWithGemini(
   issue: LookupRequest,
   baseQuery: string,
   items: SearchHit[],
+  photoConditionAssessment?: ConditionAssessment,
 ): Promise<{ summary: IssueSummary } | { error: string }> {
   const apiKey = geminiApiKey();
   if (!apiKey) {
@@ -271,7 +289,11 @@ async function summarizeIssueWithGemini(
     },
   });
 
-  const prompt = buildSummarizerPrompt(identityBlock, evidenceBlock);
+  const prompt = buildSummarizerPrompt(
+    identityBlock,
+    evidenceBlock,
+    photoConditionAssessment,
+  );
 
   try {
     const result = await model.generateContent({
@@ -340,7 +362,12 @@ export async function POST(request: Request) {
     if (items.length === 0) {
       summaryError = "No web results to summarize for this issue.";
     } else {
-      const sum = await summarizeIssueWithGemini(body, baseQuery, items);
+      const sum = await summarizeIssueWithGemini(
+        body,
+        baseQuery,
+        items,
+        body.photoConditionAssessment,
+      );
       if ("summary" in sum) {
         issueSummary = sum.summary;
       } else {
