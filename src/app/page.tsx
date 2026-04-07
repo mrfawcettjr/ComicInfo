@@ -113,6 +113,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("Analyzing…");
   const [result, setResult] = useState<ComicIdentification | null>(null);
+  const [regradeLoading, setRegradeLoading] = useState(false);
+  const [regradeFeedback, setRegradeFeedback] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -179,6 +181,7 @@ export default function Home() {
     setSheetExportFeedback(null);
     setLookupIssueSummary(null);
     setLookupSummaryError(null);
+    setRegradeFeedback(null);
   }
 
   async function analyze() {
@@ -359,6 +362,88 @@ export default function Home() {
       );
     } finally {
       setLookupLoading(false);
+    }
+  }
+
+  async function regradeFromOriginalPhotos() {
+    if (!result || files.length === 0) {
+      return;
+    }
+
+    setRegradeLoading(true);
+    setRegradeFeedback(null);
+    try {
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append("images", file);
+      }
+
+      const response = await fetch("/api/regrade", {
+        method: "POST",
+        body: formData,
+      });
+
+      const text = await response.text();
+      let payload: unknown;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(
+          response.ok
+            ? "The re-grade service returned invalid JSON."
+            : `Re-grade failed (${response.status}).`,
+        );
+      }
+
+      const body = payload as {
+        data?: {
+          physicalCondition?: string;
+          conditionNotes?: string;
+          cgcGradeRange?: string;
+        };
+        error?: string;
+        details?: string;
+      };
+
+      if (!response.ok || !body.data) {
+        throw new Error(
+          body.details ?? body.error ?? `Re-grade failed (${response.status}).`,
+        );
+      }
+
+      const physicalCondition = (body.data.physicalCondition ?? "").trim();
+      const conditionNotes = (body.data.conditionNotes ?? "").trim();
+      const cgcGradeRange = (body.data.cgcGradeRange ?? "").trim();
+
+      setResult((previous) =>
+        previous
+          ? {
+              ...previous,
+              physicalCondition,
+              conditionNotes,
+              cgcGradeRange,
+            }
+          : previous,
+      );
+
+      setLookupIssueSummary((previous) =>
+        previous
+          ? {
+              ...previous,
+              physicalCondition,
+              conditionNotes,
+              cgcGradeRange,
+            }
+          : previous,
+      );
+
+      setRegradeFeedback("Updated condition estimate from original photos.");
+    } catch (regradeError) {
+      setRegradeFeedback(
+        regradeError instanceof Error ? regradeError.message : "High-res re-grade failed.",
+      );
+    } finally {
+      setRegradeLoading(false);
     }
   }
 
@@ -610,7 +695,25 @@ export default function Home() {
                 ? "Looking up & summarizing…"
                 : "Yes, this is correct — tell me about this comic"}
             </button>
+            <button
+              type="button"
+              onClick={regradeFromOriginalPhotos}
+              disabled={regradeLoading || files.length === 0}
+              className="cursor-pointer rounded border border-zinc-300 bg-white px-4 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+            >
+              {regradeLoading
+                ? "Re-grading from originals…"
+                : "Re-grade condition from original photos"}
+            </button>
           </div>
+          {regradeFeedback ? (
+            <div
+              className="rounded border border-zinc-300 bg-zinc-50 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+              role="status"
+            >
+              {regradeFeedback}
+            </div>
+          ) : null}
 
           {lookupError && (
             <div
