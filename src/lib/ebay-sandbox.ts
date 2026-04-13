@@ -181,15 +181,24 @@ function flattenHeaders(h: HeadersInit | undefined): Record<string, string> {
   return { ...h };
 }
 
+type EbayApiResult = {
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+};
+
 /**
  * eBay Inventory rejects auto-injected `Accept-Language` from Node's global `fetch`.
  * Use `https.request` so only the headers we set are sent.
+ *
+ * Returns a minimal stand-in instead of `Response` so HTTP 204 (Inventory PUT success)
+ * does not trip runtimes that reject `new Response(..., { status: 204 })`.
  */
 async function ebayFetch(
   path: string,
   init: RequestInit,
   marketplaceId: string,
-): Promise<Response> {
+): Promise<EbayApiResult> {
   const token = await getSandboxAccessToken();
   const method = (init.method ?? "GET").toUpperCase();
   const bodyStr =
@@ -243,16 +252,15 @@ async function ebayFetch(
     req.end();
   });
 
-  /**204/205/304 must not include a body (WHATWG Response throws otherwise). */
-  const noBody =
-    statusCode === 204 || statusCode === 205 || statusCode === 304;
-  return new Response(noBody ? null : responseBody, {
+  const ok = statusCode >= 200 && statusCode < 300;
+  return {
+    ok,
     status: statusCode,
-    headers: noBody ? {} : { "Content-Type": "application/json" },
-  });
+    text: async () => responseBody,
+  };
 }
 
-async function readEbayError(res: Response): Promise<string> {
+async function readEbayError(res: EbayApiResult): Promise<string> {
   const text = await res.text();
   try {
     const data = JSON.parse(text) as {
@@ -266,7 +274,7 @@ async function readEbayError(res: Response): Promise<string> {
   } catch {
     /* ignore */
   }
-  return text.slice(0, 500) || res.statusText;
+  return text.slice(0, 500) || String(res.status);
 }
 
 export type SandboxAuctionResult = {
