@@ -107,6 +107,14 @@ function buildBookTitleAspect(row: string[]): string {
   return (built || "Comic book").slice(0, 50);
 }
 
+function buildAuthorAspect(row: string[]): string {
+  const custom = col(row, "ebay_author").trim();
+  if (custom) {
+    return custom.slice(0, 50);
+  }
+  return "Does not apply";
+}
+
 function buildDescription(row: string[]): string {
   const custom = col(row, "ebay_description_plain");
   if (custom) {
@@ -382,6 +390,7 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
       aspects: {
         "Book Title": [buildBookTitleAspect(row)],
         Language: ["English"],
+        Author: [buildAuthorAspect(row)],
       },
     },
   };

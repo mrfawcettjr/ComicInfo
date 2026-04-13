@@ -43,6 +43,7 @@ export const COMICINFO_SHEET_COLUMNS = [
   "price",
   "photo_urls",
   "merchant_location_key",
+  "ebay_author",
 ] as const;
 
 export type ComicInfoSheetColumn = (typeof COMICINFO_SHEET_COLUMNS)[number];
