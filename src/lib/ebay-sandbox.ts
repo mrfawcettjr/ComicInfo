@@ -98,6 +98,15 @@ function buildTitle(row: string[]): string {
   return (built || "Comic book listing").slice(0, 80);
 }
 
+/** Item specific for categories that require "Book Title" (Inventory `product.aspects` values max 50 chars). */
+function buildBookTitleAspect(row: string[]): string {
+  const title = col(row, "comic_title");
+  const issue = col(row, "issue_number");
+  const parts = [title, issue ? `#${issue}` : ""].filter(Boolean);
+  const built = parts.join(" ").trim();
+  return (built || "Comic book").slice(0, 50);
+}
+
 function buildDescription(row: string[]): string {
   const custom = col(row, "ebay_description_plain");
   if (custom) {
@@ -341,6 +350,9 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
       title,
       description,
       imageUrls,
+      aspects: {
+        "Book Title": [buildBookTitleAspect(row)],
+      },
     },
   };
 
