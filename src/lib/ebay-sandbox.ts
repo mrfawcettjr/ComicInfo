@@ -1,3 +1,5 @@
+import https from "node:https";
+
 import { comicInfoSheetColumnIndex, type ComicInfoSheetColumn } from "@/lib/sheet-columns";
 
 const SANDBOX_API_BASE = "https://api.sandbox.ebay.com";
@@ -162,21 +164,88 @@ async function getSandboxAccessToken(): Promise<string> {
   return data.access_token;
 }
 
+function flattenHeaders(h: HeadersInit | undefined): Record<string, string> {
+  if (!h) {
+    return {};
+  }
+  if (h instanceof Headers) {
+    const out: Record<string, string> = {};
+    h.forEach((value, key) => {
+      out[key] = value;
+    });
+    return out;
+  }
+  if (Array.isArray(h)) {
+    return Object.fromEntries(h);
+  }
+  return { ...h };
+}
+
+/**
+ * eBay Inventory rejects auto-injected `Accept-Language` from Node's global `fetch`.
+ * Use `https.request` so only the headers we set are sent.
+ */
 async function ebayFetch(
   path: string,
   init: RequestInit,
   marketplaceId: string,
 ): Promise<Response> {
   const token = await getSandboxAccessToken();
-  return fetch(`${SANDBOX_API_BASE}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Content-Language": "en-US",
-      "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
-      ...(init.headers ?? {}),
-    },
+  const method = (init.method ?? "GET").toUpperCase();
+  const bodyStr =
+    typeof init.body === "string"
+      ? init.body
+      : init.body != null
+        ? String(init.body)
+        : undefined;
+  const bodyBuffer = bodyStr ? Buffer.from(bodyStr, "utf8") : undefined;
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    "Content-Language": "en-US",
+    "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
+    ...flattenHeaders(init.headers),
+  };
+  if (bodyBuffer) {
+    headers["Content-Length"] = String(bodyBuffer.byteLength);
+  }
+
+  const urlPath = path.startsWith("/") ? path : `/${path}`;
+
+  const { statusCode, responseBody } = await new Promise<{
+    statusCode: number;
+    responseBody: string;
+  }>((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: "api.sandbox.ebay.com",
+        port: 443,
+        path: urlPath,
+        method,
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            responseBody: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    req.on("error", reject);
+    if (bodyBuffer) {
+      req.write(bodyBuffer);
+    }
+    req.end();
+  });
+
+  return new Response(responseBody, {
+    status: statusCode,
+    headers: { "Content-Type": "application/json" },
   });
 }
 
