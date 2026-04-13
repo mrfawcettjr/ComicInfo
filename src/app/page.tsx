@@ -130,6 +130,16 @@ export default function Home() {
   const [sheetExportFeedback, setSheetExportFeedback] = useState<
     { kind: "success" } | { kind: "error"; message: string } | null
   >(null);
+  /** Set after a successful "Add row" so eBay can load that sheet row by `row_id`. */
+  const [lastSheetRowId, setLastSheetRowId] = useState<string | null>(null);
+  const [ebaySandboxListingAvailable, setEbaySandboxListingAvailable] =
+    useState(false);
+  const [ebayListingLoading, setEbayListingLoading] = useState(false);
+  const [ebayListingFeedback, setEbayListingFeedback] = useState<
+    | { kind: "success"; listingId: string; offerId: string }
+    | { kind: "error"; message: string }
+    | null
+  >(null);
   /** Editable year before lookup; synced from `result` when analysis completes. */
   const [yearDraft, setYearDraft] = useState("");
 
@@ -151,6 +161,23 @@ export default function Home() {
       setYearDraft("");
     }
   }, [result]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/ebay-sandbox-listing")
+      .then((res) => res.json())
+      .then((data: { ebaySandboxListingAvailable?: boolean }) => {
+        if (!cancelled && data.ebaySandboxListingAvailable === true) {
+          setEbaySandboxListingAvailable(true);
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function mergeFiles(incoming: File[]) {
     const imageFiles = incoming.filter((file) => isImageFile(file));
@@ -179,6 +206,8 @@ export default function Home() {
     setSheetExportFeedback(null);
     setLookupIssueSummary(null);
     setLookupSummaryError(null);
+    setLastSheetRowId(null);
+    setEbayListingFeedback(null);
   }
 
   async function analyze() {
@@ -260,6 +289,8 @@ export default function Home() {
     setLookupTellMeQuery(null);
     setGoogleSheetsExportAvailable(false);
     setSheetExportFeedback(null);
+    setLastSheetRowId(null);
+    setEbayListingFeedback(null);
 
     try {
       const response = await fetch("/api/lookup", {
@@ -405,13 +436,21 @@ export default function Home() {
         );
       }
 
-      const errBody = data as { error?: string; ok?: boolean };
+      const errBody = data as {
+        error?: string;
+        ok?: boolean;
+        rowId?: string;
+        rowNumber?: number;
+      };
       if (!response.ok) {
         throw new Error(
           errBody.error ?? `Sheet export failed (${response.status}).`,
         );
       }
 
+      if (typeof errBody.rowId === "string" && errBody.rowId.trim()) {
+        setLastSheetRowId(errBody.rowId.trim());
+      }
       setSheetExportFeedback({ kind: "success" });
     } catch (exportErr) {
       setSheetExportFeedback({
@@ -421,6 +460,63 @@ export default function Home() {
       });
     } finally {
       setSheetExportLoading(false);
+    }
+  }
+
+  async function listOnEbaySandbox() {
+    if (!lastSheetRowId) {
+      return;
+    }
+
+    setEbayListingLoading(true);
+    setEbayListingFeedback(null);
+    try {
+      const response = await fetch("/api/ebay-sandbox-listing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowId: lastSheetRowId }),
+      });
+
+      const text = await response.text();
+      let payload: unknown;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(
+          response.ok
+            ? "Invalid response from eBay listing service."
+            : `eBay listing failed (${response.status}).`,
+        );
+      }
+
+      const body = payload as {
+        ok?: boolean;
+        error?: string;
+        listingId?: string;
+        offerId?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body.error ?? `eBay sandbox listing failed (${response.status}).`);
+      }
+
+      if (!body.listingId || !body.offerId) {
+        throw new Error("eBay response missing listing or offer id.");
+      }
+
+      setEbayListingFeedback({
+        kind: "success",
+        listingId: body.listingId,
+        offerId: body.offerId,
+      });
+    } catch (ebayErr) {
+      setEbayListingFeedback({
+        kind: "error",
+        message:
+          ebayErr instanceof Error ? ebayErr.message : "eBay sandbox listing failed.",
+      });
+    } finally {
+      setEbayListingLoading(false);
     }
   }
 
@@ -657,6 +753,46 @@ export default function Home() {
                   >
                     {sheetExportFeedback.message}
                   </p>
+                ) : null}
+                {sheetExportFeedback?.kind === "success" &&
+                ebaySandboxListingAvailable &&
+                lastSheetRowId ? (
+                  <div className="space-y-2 border-t border-zinc-200 pt-3 dark:border-zinc-600">
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      Creates a <strong className="font-medium">sandbox</strong> 7-day auction
+                      from that row (requires price, USD, HTTPS photo URLs, and eBay policy env
+                      vars). Edit the sheet row first if needed, then list.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={listOnEbaySandbox}
+                      disabled={ebayListingLoading}
+                      className="cursor-pointer rounded border border-violet-400 bg-violet-50 px-4 py-2 text-sm text-violet-950 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-violet-600 dark:bg-violet-950 dark:text-violet-100 dark:hover:bg-violet-900"
+                    >
+                      {ebayListingLoading
+                        ? "Creating sandbox auction…"
+                        : "List on eBay Sandbox (7-day auction)"}
+                    </button>
+                    {ebayListingFeedback?.kind === "success" ? (
+                      <p
+                        className="text-sm text-emerald-800 dark:text-emerald-300"
+                        role="status"
+                      >
+                        Sandbox listing created. Listing ID{" "}
+                        <span className="font-mono">{ebayListingFeedback.listingId}</span> (offer{" "}
+                        <span className="font-mono">{ebayListingFeedback.offerId}</span>). IDs are
+                        written back to the sheet row.
+                      </p>
+                    ) : null}
+                    {ebayListingFeedback?.kind === "error" ? (
+                      <p
+                        className="text-sm text-amber-800 dark:text-amber-200"
+                        role="status"
+                      >
+                        {ebayListingFeedback.message}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             )}

@@ -48,3 +48,11 @@ export const COMICINFO_SHEET_COLUMNS = [
 export type ComicInfoSheetColumn = (typeof COMICINFO_SHEET_COLUMNS)[number];
 
 export const COMICINFO_SHEET_COLUMN_COUNT = COMICINFO_SHEET_COLUMNS.length;
+
+export function comicInfoSheetColumnIndex(name: ComicInfoSheetColumn): number {
+  const i = COMICINFO_SHEET_COLUMNS.indexOf(name);
+  if (i < 0) {
+    throw new Error(`Unknown ComicInfo sheet column: ${name}`);
+  }
+  return i;
+}

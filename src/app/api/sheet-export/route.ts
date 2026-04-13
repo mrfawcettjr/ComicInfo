@@ -30,14 +30,14 @@ export async function POST(request: Request) {
   const { baseQuery, tellMeQuery, issueSummary, ...lookupFields } = data;
 
   try {
-    await appendComicInfoRowToGoogleSheet({
+    const { rowId, rowNumber } = await appendComicInfoRowToGoogleSheet({
       lookup: lookupFields,
       yearIdentified: data.yearIdentified,
       baseQuery,
       tellMeQuery,
       issueSummary,
     });
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, rowId, rowNumber });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Google Sheets append failed.";
