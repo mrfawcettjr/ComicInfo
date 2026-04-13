@@ -357,12 +357,12 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     throw new Error(`createOrReplaceInventoryItem: ${await readEbayError(invRes)}`);
   }
 
+  // Quantity stays on the inventory item only; auction offers reject `availableQuantity` (eBay error 25762).
   const offerBody = {
     sku,
     marketplaceId: e.marketplaceId,
     format: "AUCTION",
     listingDuration: "DAYS_7",
-    availableQuantity,
     categoryId,
     merchantLocationKey,
     listingPolicies: {
