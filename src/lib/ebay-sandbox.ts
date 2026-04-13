@@ -243,9 +243,12 @@ async function ebayFetch(
     req.end();
   });
 
-  return new Response(responseBody, {
+  /**204/205/304 must not include a body (WHATWG Response throws otherwise). */
+  const noBody =
+    statusCode === 204 || statusCode === 205 || statusCode === 304;
+  return new Response(noBody ? null : responseBody, {
     status: statusCode,
-    headers: { "Content-Type": "application/json" },
+    headers: noBody ? {} : { "Content-Type": "application/json" },
   });
 }
 
