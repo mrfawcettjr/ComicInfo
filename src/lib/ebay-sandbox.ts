@@ -365,7 +365,9 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     );
   }
 
-  const categoryId = col(row, "ebay_category_id") || e.defaultCategoryId;
+  /** eBay leaf category for the listing; sheet `ebay_category_id`, else `EBAY_SANDBOX_DEFAULT_CATEGORY_ID`. */
+  const categoryId =
+    col(row, "ebay_category_id").trim() || e.defaultCategoryId;
   const merchantLocationKey =
     col(row, "merchant_location_key") || e.merchantLocationKey;
   if (!merchantLocationKey) {
@@ -414,7 +416,7 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     marketplaceId: e.marketplaceId,
     format: "AUCTION",
     listingDuration: "DAYS_7",
-    categoryId,
+    categoryId, // createOffer: from Google Sheet `ebay_category_id` (see above)
     merchantLocationKey,
     listingPolicies: {
       fulfillmentPolicyId: e.fulfillmentPolicyId,
