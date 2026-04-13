@@ -381,6 +381,7 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
       imageUrls,
       aspects: {
         "Book Title": [buildBookTitleAspect(row)],
+        Language: ["English"],
       },
     },
   };
