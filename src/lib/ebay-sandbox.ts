@@ -60,6 +60,19 @@ function parseImageUrls(raw: string): string[] {
     .slice(0, 12);
 }
 
+/** Positive integer from the sheet `quantity` column (used for inventory + offer). */
+function parseAvailableQuantity(raw: string): number {
+  const t = raw.replace(/[, ]/g, "").trim();
+  if (!t) {
+    throw new Error('Sheet row must include a positive integer in "quantity".');
+  }
+  const n = Number.parseInt(t, 10);
+  if (!Number.isFinite(n) || n < 1) {
+    throw new Error('Sheet "quantity" must be a positive integer.');
+  }
+  return n;
+}
+
 function buildSku(rowId: string): string {
   const compact = rowId.replace(/-/g, "");
   const sku = `CI${compact}`;
@@ -235,10 +248,12 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     );
   }
 
+  const availableQuantity = parseAvailableQuantity(col(row, "quantity"));
+
   const inventoryBody = {
     availability: {
       shipToLocationAvailability: {
-        quantity: 1,
+        quantity: availableQuantity,
       },
     },
     condition: pickInventoryCondition(),
@@ -267,7 +282,7 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     marketplaceId: e.marketplaceId,
     format: "AUCTION",
     listingDuration: "DAYS_7",
-    availableQuantity: 1,
+    availableQuantity,
     categoryId,
     merchantLocationKey,
     listingPolicies: {
