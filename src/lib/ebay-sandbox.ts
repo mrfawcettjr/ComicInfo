@@ -286,6 +286,35 @@ async function readEbayError(res: EbayApiResult): Promise<string> {
   return text.slice(0, 500) || String(res.status);
 }
 
+/** eBay returns 25002 with `offerId` when a draft offer already exists for this SKU/format. */
+function parseOfferIdFromDuplicateCreateOffer(body: string): string | null {
+  try {
+    const data = JSON.parse(body) as {
+      errors?: Array<{
+        errorId?: number;
+        message?: string;
+        parameters?: Array<{ name?: string; value?: string }>;
+      }>;
+    };
+    for (const err of data.errors ?? []) {
+      if (err.errorId !== 25002) {
+        continue;
+      }
+      const msg = err.message ?? "";
+      if (!/already exists/i.test(msg)) {
+        continue;
+      }
+      const offerParam = err.parameters?.find((p) => p.name === "offerId");
+      if (offerParam?.value?.trim()) {
+        return offerParam.value.trim();
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export type SandboxAuctionResult = {
   offerId: string;
   listingId: string;
@@ -407,11 +436,27 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     throw new Error(`createOffer: invalid JSON (${offerRes.status})`);
   }
 
-  if (!offerRes.ok || !offerJson.offerId) {
-    throw new Error(`createOffer (${offerRes.status}): ${offerText.slice(0, 1200)}`);
+  let offerId = offerJson.offerId?.trim();
+  if (offerRes.ok && offerId) {
+    /* new draft */
+  } else {
+    const existingId = parseOfferIdFromDuplicateCreateOffer(offerText);
+    if (!existingId) {
+      throw new Error(`createOffer (${offerRes.status}): ${offerText.slice(0, 1200)}`);
+    }
+    offerId = existingId;
+    const updateRes = await ebayFetch(
+      `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(offerBody),
+      },
+      e.marketplaceId,
+    );
+    if (!updateRes.ok) {
+      throw new Error(`updateOffer: ${await readEbayError(updateRes)}`);
+    }
   }
-
-  const offerId = offerJson.offerId;
 
   const publishRes = await ebayFetch(
     `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`,
