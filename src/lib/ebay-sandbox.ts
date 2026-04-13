@@ -160,7 +160,8 @@ async function ebayFetch(
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Content-Language": "en-US",
+      "Content-Language": "en_US",
+      "Accept-Language": "en_US",
       "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
       ...(init.headers ?? {}),
     },
