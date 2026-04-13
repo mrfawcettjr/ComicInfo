@@ -160,8 +160,9 @@ async function ebayFetch(
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Content-Language": "en_US",
-      "Accept-Language": "en_US",
+      // Inventory API expects a content language header; Accept-Language is omitted
+      // because eBay rejected our previous value as invalid for this route set.
+      "Content-Language": "en-US",
       "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
       ...(init.headers ?? {}),
     },
