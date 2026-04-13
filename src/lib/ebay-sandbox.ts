@@ -2,7 +2,8 @@ import https from "node:https";
 
 import { comicInfoSheetColumnIndex, type ComicInfoSheetColumn } from "@/lib/sheet-columns";
 
-const SANDBOX_API_BASE = "https://api.sandbox.ebay.com";
+const SANDBOX_API_HOST = "api.sandbox.ebay.com";
+const SANDBOX_APIM_HOST = "apim.sandbox.ebay.com";
 const SANDBOX_OAUTH_TOKEN = "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
 
 type TokenCache = { accessToken: string; expiresAtMs: number };
@@ -60,6 +61,40 @@ function parseImageUrls(raw: string): string[] {
     .map((s) => s.trim())
     .filter((s) => /^https:\/\//i.test(s))
     .slice(0, 12);
+}
+
+/**
+ * Google Drive "share" links point at HTML viewers; eBay Media API must fetch raw image bytes.
+ * Converts `/file/d/{id}/…` and `open?id=` to `uc?export=view&id=…`.
+ */
+function normalizePhotoUrlForEbayMediaUpload(url: string): string {
+  const u = url.trim();
+  try {
+    const parsed = new URL(u);
+    if (!parsed.hostname.includes("drive.google.com")) {
+      return u;
+    }
+    const fileMatch = parsed.pathname.match(/\/file\/d\/([^/]+)/i);
+    if (fileMatch?.[1]) {
+      return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileMatch[1])}`;
+    }
+    const openId = parsed.searchParams.get("id");
+    if (openId && parsed.pathname.includes("/open")) {
+      return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(openId)}`;
+    }
+  } catch {
+    /* keep original */
+  }
+  return u;
+}
+
+function isAlreadyEpsImageUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname;
+    return h.includes("ebayimg.com") || h.includes("ebaystatic.com");
+  } catch {
+    return false;
+  }
 }
 
 /** Positive integer from the sheet `quantity` column (used for inventory + offer). */
@@ -215,6 +250,7 @@ async function ebayFetch(
   path: string,
   init: RequestInit,
   marketplaceId: string,
+  options?: { host?: string },
 ): Promise<EbayApiResult> {
   const token = await getSandboxAccessToken();
   const method = (init.method ?? "GET").toUpperCase();
@@ -238,6 +274,7 @@ async function ebayFetch(
   }
 
   const urlPath = path.startsWith("/") ? path : `/${path}`;
+  const hostname = options?.host ?? SANDBOX_API_HOST;
 
   const { statusCode, responseBody } = await new Promise<{
     statusCode: number;
@@ -245,7 +282,7 @@ async function ebayFetch(
   }>((resolve, reject) => {
     const req = https.request(
       {
-        hostname: "api.sandbox.ebay.com",
+        hostname,
         port: 443,
         path: urlPath,
         method,
@@ -292,6 +329,56 @@ async function readEbayError(res: EbayApiResult): Promise<string> {
     /* ignore */
   }
   return text.slice(0, 500) || String(res.status);
+}
+
+/**
+ * Uploads a sheet-hosted URL via [createImageFromUrl](https://developer.ebay.com/api-docs/commerce/media/resources/image/methods/createImageFromUrl)
+ * (sandbox: `apim.sandbox.ebay.com`) and returns the EPS `imageUrl` for Inventory `product.imageUrls`.
+ */
+async function createEpsImageFromUrl(
+  sheetUrl: string,
+  marketplaceId: string,
+): Promise<string> {
+  const trimmed = sheetUrl.trim();
+  if (isAlreadyEpsImageUrl(trimmed)) {
+    return trimmed;
+  }
+  const imageUrl = normalizePhotoUrlForEbayMediaUpload(trimmed);
+  const res = await ebayFetch(
+    "/commerce/media/v1_beta/image/create_image_from_url",
+    {
+      method: "POST",
+      body: JSON.stringify({ imageUrl }),
+    },
+    marketplaceId,
+    { host: SANDBOX_APIM_HOST },
+  );
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`createImageFromUrl (${res.status}): ${text.slice(0, 800)}`);
+  }
+  let data: { imageUrl?: string };
+  try {
+    data = text ? (JSON.parse(text) as typeof data) : {};
+  } catch {
+    throw new Error(`createImageFromUrl: invalid JSON (${res.status})`);
+  }
+  const eps = data.imageUrl?.trim();
+  if (!eps) {
+    throw new Error("createImageFromUrl: missing imageUrl in response.");
+  }
+  return eps;
+}
+
+async function resolvePhotoUrlsToEps(
+  urls: string[],
+  marketplaceId: string,
+): Promise<string[]> {
+  const out: string[] = [];
+  for (const u of urls) {
+    out.push(await createEpsImageFromUrl(u, marketplaceId));
+  }
+  return out;
 }
 
 /** eBay returns 25002 with `offerId` when a draft offer already exists for this SKU/format. */
@@ -358,12 +445,14 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     throw new Error('Only USD currency is supported for this integration (set currency to "USD").');
   }
 
-  const imageUrls = parseImageUrls(col(row, "photo_urls"));
-  if (imageUrls.length === 0) {
+  const rawPhotoUrls = parseImageUrls(col(row, "photo_urls"));
+  if (rawPhotoUrls.length === 0) {
     throw new Error(
       'Sheet row must include at least one HTTPS URL in "photo_urls" (pipe, comma, or newline separated).',
     );
   }
+
+  const imageUrls = await resolvePhotoUrlsToEps(rawPhotoUrls, e.marketplaceId);
 
   /** eBay leaf category for the listing; sheet `ebay_category_id`, else `EBAY_SANDBOX_DEFAULT_CATEGORY_ID`. */
   const categoryId =
