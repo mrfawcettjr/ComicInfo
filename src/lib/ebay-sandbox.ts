@@ -367,15 +367,17 @@ async function createEpsImageFromUrl(
   if (!res.ok) {
     throw new Error(`createImageFromUrl (${res.status}): ${text.slice(0, 800)}`);
   }
-  let data: { imageUrl?: string };
+  let data: { imageUrl?: string; maxDimensionImageUrl?: string };
   try {
     data = text ? (JSON.parse(text) as typeof data) : {};
   } catch {
     throw new Error(`createImageFromUrl: invalid JSON (${res.status})`);
   }
-  const eps = data.imageUrl?.trim();
+  const eps = data.maxDimensionImageUrl?.trim() || data.imageUrl?.trim();
   if (!eps) {
-    throw new Error("createImageFromUrl: missing imageUrl in response.");
+    throw new Error(
+      "createImageFromUrl: missing maxDimensionImageUrl/imageUrl in response.",
+    );
   }
   return eps;
 }
@@ -447,15 +449,17 @@ async function createEpsImageFromFile(
   if (statusCode < 200 || statusCode >= 300) {
     throw new Error(`createImageFromFile (${statusCode}): ${responseBody.slice(0, 800)}`);
   }
-  let data: { imageUrl?: string };
+  let data: { imageUrl?: string; maxDimensionImageUrl?: string };
   try {
     data = responseBody ? (JSON.parse(responseBody) as typeof data) : {};
   } catch {
     throw new Error(`createImageFromFile: invalid JSON (${statusCode})`);
   }
-  const eps = data.imageUrl?.trim();
+  const eps = data.maxDimensionImageUrl?.trim() || data.imageUrl?.trim();
   if (!eps) {
-    throw new Error("createImageFromFile: missing imageUrl in response.");
+    throw new Error(
+      "createImageFromFile: missing maxDimensionImageUrl/imageUrl in response.",
+    );
   }
   return eps;
 }
