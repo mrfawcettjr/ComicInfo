@@ -96,6 +96,7 @@ export async function POST(request: Request) {
       ebay_offer_id: result.offerId,
       ebay_listing_id: result.listingId,
       ebay_sku: result.sku,
+      photo_urls: result.imageUrls.join(" | "),
       updated_at: now,
     });
 

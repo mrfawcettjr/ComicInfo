@@ -100,13 +100,13 @@ export function buildComicInfoSheetRowValues(input: {
     input.baseQuery,
     "",
     "",
-    "",
+    "259104",
     "",
     "1",
     "USD",
+    "0.99",
     "",
-    "",
-    "",
+    "HomeBaseWarehouse",
     "",
   ];
 }
@@ -277,6 +277,7 @@ export async function updateComicInfoSheetRowPartial(
       | "ebay_offer_id"
       | "ebay_listing_id"
       | "ebay_sku"
+      | "photo_urls"
       | "updated_at",
       string
     >
@@ -314,6 +315,9 @@ export async function updateComicInfoSheetRowPartial(
   }
   if (updates.ebay_sku !== undefined) {
     set("ebay_sku", updates.ebay_sku);
+  }
+  if (updates.photo_urls !== undefined) {
+    set("photo_urls", updates.photo_urls);
   }
   if (updates.updated_at !== undefined) {
     set("updated_at", updates.updated_at);

@@ -642,7 +642,7 @@ async function createSandboxSevenDayAuctionFromRowWithEpsImages(
     );
   }
 
-  return { offerId, listingId, sku: inputs.sku };
+  return { offerId, listingId, sku: inputs.sku, imageUrls };
 }
 
 /** eBay returns 25002 with `offerId` when a draft offer already exists for this SKU/format. */
@@ -678,6 +678,7 @@ export type SandboxAuctionResult = {
   offerId: string;
   listingId: string;
   sku: string;
+  imageUrls: string[];
 };
 
 export async function createSandboxSevenDayAuctionFromSheetRow(
