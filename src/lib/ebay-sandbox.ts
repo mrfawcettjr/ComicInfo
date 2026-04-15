@@ -239,6 +239,16 @@ type EbayApiResult = {
   text: () => Promise<string>;
 };
 
+type ListingInputs = {
+  sku: string;
+  title: string;
+  description: string;
+  categoryId: string;
+  merchantLocationKey: string;
+  availableQuantity: number;
+  parsedPrice: { value: string; currency: string };
+};
+
 /**
  * eBay Inventory rejects auto-injected `Accept-Language` from Node's global `fetch`.
  * Use `https.request` so only the headers we set are sent.
@@ -381,62 +391,97 @@ async function resolvePhotoUrlsToEps(
   return out;
 }
 
-/** eBay returns 25002 with `offerId` when a draft offer already exists for this SKU/format. */
-function parseOfferIdFromDuplicateCreateOffer(body: string): string | null {
-  try {
-    const data = JSON.parse(body) as {
-      errors?: Array<{
-        errorId?: number;
-        message?: string;
-        parameters?: Array<{ name?: string; value?: string }>;
-      }>;
-    };
-    for (const err of data.errors ?? []) {
-      if (err.errorId !== 25002) {
-        continue;
-      }
-      const msg = err.message ?? "";
-      if (!/already exists/i.test(msg)) {
-        continue;
-      }
-      const offerParam = err.parameters?.find((p) => p.name === "offerId");
-      if (offerParam?.value?.trim()) {
-        return offerParam.value.trim();
-      }
-    }
-  } catch {
-    /* ignore */
+async function createEpsImageFromFile(
+  file: File,
+  marketplaceId: string,
+): Promise<string> {
+  const token = await getSandboxAccessToken();
+  const boundary = `----comicinfo-${Math.random().toString(16).slice(2)}`;
+  const filename = (file.name || "upload.jpg").replace(/"/g, "");
+  const mimeType = file.type?.trim() || "application/octet-stream";
+  const fileBytes = Buffer.from(await file.arrayBuffer());
+  const head =
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="image"; filename="${filename}"\r\n` +
+    `Content-Type: ${mimeType}\r\n\r\n`;
+  const tail = `\r\n--${boundary}--\r\n`;
+  const bodyBuffer = Buffer.concat([
+    Buffer.from(head, "utf8"),
+    fileBytes,
+    Buffer.from(tail, "utf8"),
+  ]);
+
+  const { statusCode, responseBody } = await new Promise<{
+    statusCode: number;
+    responseBody: string;
+  }>((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: SANDBOX_APIM_HOST,
+        port: 443,
+        path: "/commerce/media/v1_beta/image/create_image_from_file",
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "Content-Length": String(bodyBuffer.byteLength),
+          "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () =>
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            responseBody: Buffer.concat(chunks).toString("utf8"),
+          }),
+        );
+      },
+    );
+    req.on("error", reject);
+    req.write(bodyBuffer);
+    req.end();
+  });
+
+  if (statusCode < 200 || statusCode >= 300) {
+    throw new Error(`createImageFromFile (${statusCode}): ${responseBody.slice(0, 800)}`);
   }
-  return null;
+  let data: { imageUrl?: string };
+  try {
+    data = responseBody ? (JSON.parse(responseBody) as typeof data) : {};
+  } catch {
+    throw new Error(`createImageFromFile: invalid JSON (${statusCode})`);
+  }
+  const eps = data.imageUrl?.trim();
+  if (!eps) {
+    throw new Error("createImageFromFile: missing imageUrl in response.");
+  }
+  return eps;
 }
 
-export type SandboxAuctionResult = {
-  offerId: string;
-  listingId: string;
-  sku: string;
-};
-
-export async function createSandboxSevenDayAuctionFromSheetRow(
-  row: string[],
-): Promise<SandboxAuctionResult> {
-  const e = ebayEnv();
-  if (!isEbaySandboxListingConfigured()) {
-    throw new Error("eBay sandbox listing is not configured on the server.");
+async function resolveFilesToEps(
+  files: File[],
+  marketplaceId: string,
+): Promise<string[]> {
+  const out: string[] = [];
+  for (const file of files) {
+    out.push(await createEpsImageFromFile(file, marketplaceId));
   }
+  return out;
+}
 
+function buildListingInputsFromRow(row: string[]): ListingInputs {
+  const e = ebayEnv();
   const rowId = col(row, "row_id");
   if (!rowId) {
     throw new Error("Sheet row is missing row_id.");
   }
 
-  const sku = buildSku(rowId);
-  const title = buildTitle(row);
-  const description = buildDescription(row);
-
   const currencyRaw = col(row, "currency") || "USD";
   const priceRaw = col(row, "price");
-  const parsed = parseMoney(priceRaw);
-  if (!parsed) {
+  const parsedPrice = parseMoney(priceRaw);
+  if (!parsedPrice) {
     throw new Error(
       'Sheet row must include a positive numeric "price" (auction starting price).',
     );
@@ -445,18 +490,6 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     throw new Error('Only USD currency is supported for this integration (set currency to "USD").');
   }
 
-  const rawPhotoUrls = parseImageUrls(col(row, "photo_urls"));
-  if (rawPhotoUrls.length === 0) {
-    throw new Error(
-      'Sheet row must include at least one HTTPS URL in "photo_urls" (pipe, comma, or newline separated).',
-    );
-  }
-
-  const imageUrls = await resolvePhotoUrlsToEps(rawPhotoUrls, e.marketplaceId);
-
-  /** eBay leaf category for the listing; sheet `ebay_category_id`, else `EBAY_SANDBOX_DEFAULT_CATEGORY_ID`. */
-  const categoryId =
-    col(row, "ebay_category_id").trim() || e.defaultCategoryId;
   const merchantLocationKey =
     col(row, "merchant_location_key") || e.merchantLocationKey;
   if (!merchantLocationKey) {
@@ -465,18 +498,39 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     );
   }
 
-  const availableQuantity = parseAvailableQuantity(col(row, "quantity"));
+  return {
+    sku: buildSku(rowId),
+    title: buildTitle(row),
+    description: buildDescription(row),
+    categoryId: col(row, "ebay_category_id").trim() || e.defaultCategoryId,
+    merchantLocationKey,
+    availableQuantity: parseAvailableQuantity(col(row, "quantity")),
+    parsedPrice,
+  };
+}
 
+async function createSandboxSevenDayAuctionFromRowWithEpsImages(
+  row: string[],
+  imageUrls: string[],
+): Promise<SandboxAuctionResult> {
+  const e = ebayEnv();
+  if (!isEbaySandboxListingConfigured()) {
+    throw new Error("eBay sandbox listing is not configured on the server.");
+  }
+  if (imageUrls.length === 0) {
+    throw new Error("At least one image is required.");
+  }
+  const inputs = buildListingInputsFromRow(row);
   const inventoryBody = {
     availability: {
       shipToLocationAvailability: {
-        quantity: availableQuantity,
+        quantity: inputs.availableQuantity,
       },
     },
     condition: pickInventoryCondition(),
     product: {
-      title,
-      description,
+      title: inputs.title,
+      description: inputs.description,
       imageUrls,
       aspects: {
         "Book Title": [buildBookTitleAspect(row)],
@@ -487,7 +541,7 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
   };
 
   const invRes = await ebayFetch(
-    `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`,
+    `/sell/inventory/v1/inventory_item/${encodeURIComponent(inputs.sku)}`,
     {
       method: "PUT",
       body: JSON.stringify(inventoryBody),
@@ -501,12 +555,12 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
 
   // Quantity stays on the inventory item only; auction offers reject `availableQuantity` (eBay error 25762).
   const offerBody = {
-    sku,
+    sku: inputs.sku,
     marketplaceId: e.marketplaceId,
     format: "AUCTION",
     listingDuration: "DAYS_7",
-    categoryId, // createOffer: from Google Sheet `ebay_category_id` (see above)
-    merchantLocationKey,
+    categoryId: inputs.categoryId, // createOffer: from Google Sheet `ebay_category_id` (see above)
+    merchantLocationKey: inputs.merchantLocationKey,
     listingPolicies: {
       fulfillmentPolicyId: e.fulfillmentPolicyId,
       paymentPolicyId: e.paymentPolicyId,
@@ -514,8 +568,8 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     },
     pricingSummary: {
       auctionStartPrice: {
-        value: parsed.value,
-        currency: parsed.currency,
+        value: inputs.parsedPrice.value,
+        currency: inputs.parsedPrice.currency,
       },
     },
   };
@@ -584,5 +638,75 @@ export async function createSandboxSevenDayAuctionFromSheetRow(
     );
   }
 
-  return { offerId, listingId, sku };
+  return { offerId, listingId, sku: inputs.sku };
+}
+
+/** eBay returns 25002 with `offerId` when a draft offer already exists for this SKU/format. */
+function parseOfferIdFromDuplicateCreateOffer(body: string): string | null {
+  try {
+    const data = JSON.parse(body) as {
+      errors?: Array<{
+        errorId?: number;
+        message?: string;
+        parameters?: Array<{ name?: string; value?: string }>;
+      }>;
+    };
+    for (const err of data.errors ?? []) {
+      if (err.errorId !== 25002) {
+        continue;
+      }
+      const msg = err.message ?? "";
+      if (!/already exists/i.test(msg)) {
+        continue;
+      }
+      const offerParam = err.parameters?.find((p) => p.name === "offerId");
+      if (offerParam?.value?.trim()) {
+        return offerParam.value.trim();
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export type SandboxAuctionResult = {
+  offerId: string;
+  listingId: string;
+  sku: string;
+};
+
+export async function createSandboxSevenDayAuctionFromSheetRow(
+  row: string[],
+): Promise<SandboxAuctionResult> {
+  const e = ebayEnv();
+  if (!isEbaySandboxListingConfigured()) {
+    throw new Error("eBay sandbox listing is not configured on the server.");
+  }
+  const rawPhotoUrls = parseImageUrls(col(row, "photo_urls"));
+  if (rawPhotoUrls.length === 0) {
+    throw new Error(
+      'Sheet row must include at least one HTTPS URL in "photo_urls" (pipe, comma, or newline separated).',
+    );
+  }
+  const imageUrls = await resolvePhotoUrlsToEps(rawPhotoUrls, e.marketplaceId);
+  return createSandboxSevenDayAuctionFromRowWithEpsImages(row, imageUrls);
+}
+
+export async function createSandboxSevenDayAuctionFromSheetRowAndFiles(
+  row: string[],
+  files: File[],
+): Promise<SandboxAuctionResult> {
+  const e = ebayEnv();
+  if (!isEbaySandboxListingConfigured()) {
+    throw new Error("eBay sandbox listing is not configured on the server.");
+  }
+  if (files.length === 0) {
+    throw new Error("Attach at least one image file.");
+  }
+  if (files.length > 12) {
+    throw new Error("At most 12 images can be uploaded to eBay.");
+  }
+  const imageUrls = await resolveFilesToEps(files, e.marketplaceId);
+  return createSandboxSevenDayAuctionFromRowWithEpsImages(row, imageUrls);
 }

@@ -467,14 +467,27 @@ export default function Home() {
     if (!lastSheetRowId) {
       return;
     }
+    if (files.length === 0) {
+      setEbayListingFeedback({
+        kind: "error",
+        message: "No dropped images found. Add images before listing to eBay sandbox.",
+      });
+      return;
+    }
 
     setEbayListingLoading(true);
     setEbayListingFeedback(null);
     try {
-      const response = await fetch("/api/ebay-sandbox-listing", {
+      const uploadFiles = await Promise.all(files.map((file) => compressImageForUpload(file)));
+      const formData = new FormData();
+      formData.append("rowId", lastSheetRowId);
+      for (const file of uploadFiles) {
+        formData.append("images", file);
+      }
+
+      const response = await fetch("/api/ebay-sandbox-listing-direct", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowId: lastSheetRowId }),
+        body: formData,
       });
 
       const text = await response.text();
@@ -760,8 +773,9 @@ export default function Home() {
                   <div className="space-y-2 border-t border-zinc-200 pt-3 dark:border-zinc-600">
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
                       Creates a <strong className="font-medium">sandbox</strong> 7-day auction
-                      from that row (requires price, USD, HTTPS photo URLs, and eBay policy env
-                      vars). Edit the sheet row first if needed, then list.
+                      from that row, uploading the dropped images directly to eBay EPS via the
+                      Media API (requires price, USD, and eBay policy env vars). Edit the sheet row
+                      first if needed, then list.
                     </p>
                     <button
                       type="button"
