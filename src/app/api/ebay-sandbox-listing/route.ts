@@ -18,8 +18,10 @@ const bodySchema = z.object({
 });
 
 export async function GET() {
+  const configured = isEbaySandboxListingConfigured();
   return Response.json({
-    ebaySandboxListingAvailable: isEbaySandboxListingConfigured(),
+    ebaySandboxListingAvailable: configured,
+    ebaySandboxResetAvailable: configured,
   });
 }
 

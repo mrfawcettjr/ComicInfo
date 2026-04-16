@@ -116,6 +116,145 @@ function buildSku(rowId: string): string {
   return sku.length <= 50 ? sku : sku.slice(0, 50);
 }
 
+/** ComicInfo sandbox listings use SKUs from `buildSku` (`CI` + alphanumeric, max 50). */
+export function isComicInfoSandboxSku(sku: string): boolean {
+  const s = sku.trim();
+  return (
+    s.startsWith("CI") &&
+    s.length >= 3 &&
+    s.length <= 50 &&
+    /^CI[A-Za-z0-9]+$/.test(s)
+  );
+}
+
+export type SandboxResetResult = {
+  ciSkusFound: number;
+  skusProcessed: number;
+  offersRemoved: number;
+  errors: string[];
+};
+
+/**
+ * Sandbox only: lists inventory via Inventory API on `api.sandbox.ebay.com`, finds SKUs matching
+ * `isComicInfoSandboxSku`, withdraws published offers, deletes offers, then deletes inventory items.
+ */
+export async function resetSandboxComicInfoSkus(): Promise<SandboxResetResult> {
+  if (!isEbaySandboxListingConfigured()) {
+    throw new Error("eBay sandbox listing is not configured on the server.");
+  }
+  const e = ebayEnv();
+  const marketplaceId = e.marketplaceId;
+  const limit = 100;
+  const ciSkus = new Set<string>();
+
+  for (let page = 0; page < 10_000; page++) {
+    const qs = new URLSearchParams({
+      limit: String(limit),
+      offset: String(page),
+    });
+    const invRes = await ebayFetch(
+      `/sell/inventory/v1/inventory_item?${qs.toString()}`,
+      { method: "GET" },
+      marketplaceId,
+    );
+    const invText = await invRes.text();
+    if (!invRes.ok) {
+      throw new Error(`getInventoryItems: ${await readEbayError(invRes)}`);
+    }
+    let invData: { inventoryItems?: Array<{ sku?: string }> };
+    try {
+      invData = invText ? (JSON.parse(invText) as typeof invData) : {};
+    } catch {
+      throw new Error(`getInventoryItems: invalid JSON (${invRes.status})`);
+    }
+    const items = invData.inventoryItems ?? [];
+    if (items.length === 0) {
+      break;
+    }
+    for (const item of items) {
+      const sku = item.sku?.trim();
+      if (sku && isComicInfoSandboxSku(sku)) {
+        ciSkus.add(sku);
+      }
+    }
+    if (items.length < limit) {
+      break;
+    }
+  }
+
+  const errors: string[] = [];
+  let offersRemoved = 0;
+  let skusProcessed = 0;
+
+  for (const sku of ciSkus) {
+    skusProcessed += 1;
+    const offerQs = new URLSearchParams({ sku });
+    const offRes = await ebayFetch(
+      `/sell/inventory/v1/offer?${offerQs.toString()}`,
+      { method: "GET" },
+      marketplaceId,
+    );
+    const offText = await offRes.text();
+    let offers: Array<{ offerId?: string; listing?: { listingId?: string } | null }> = [];
+    if (offRes.ok && offText) {
+      try {
+        const offData = JSON.parse(offText) as { offers?: typeof offers };
+        offers = offData.offers ?? [];
+      } catch {
+        errors.push(`getOffers ${sku}: invalid JSON`);
+      }
+    } else if (offRes.status !== 404) {
+      errors.push(`getOffers ${sku}: ${offText.slice(0, 300) || offRes.status}`);
+    }
+
+    for (const offer of offers) {
+      const offerId = offer.offerId?.trim();
+      if (!offerId) {
+        continue;
+      }
+      if (offer.listing?.listingId) {
+        const wRes = await ebayFetch(
+          `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/withdraw`,
+          { method: "POST" },
+          marketplaceId,
+        );
+        if (!wRes.ok) {
+          const wMsg = await readEbayError(wRes);
+          if (!/not published|already ended|invalid|unpublished/i.test(wMsg)) {
+            errors.push(`withdrawOffer ${offerId}: ${wMsg}`);
+          }
+        }
+      }
+      const dRes = await ebayFetch(
+        `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`,
+        { method: "DELETE" },
+        marketplaceId,
+      );
+      if (dRes.ok || dRes.status === 204) {
+        offersRemoved += 1;
+      } else {
+        errors.push(`deleteOffer ${offerId}: ${await readEbayError(dRes)}`);
+      }
+    }
+
+    const delInv = await ebayFetch(
+      `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`,
+      { method: "DELETE" },
+      marketplaceId,
+    );
+    if (!delInv.ok && delInv.status !== 404) {
+      errors.push(`deleteInventoryItem ${sku}: ${await readEbayError(delInv)}`);
+    }
+  }
+
+  return {
+    ciSkusFound: ciSkus.size,
+    skusProcessed,
+    offersRemoved,
+    errors,
+  };
+}
+
 function pickInventoryCondition(): string {
   /** Inventory API condition enums; comics are usually pre-owned. */
   return "USED_GOOD";
@@ -274,12 +413,12 @@ async function ebayFetch(
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
     "Content-Language": "en-US",
     "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
     ...flattenHeaders(init.headers),
   };
   if (bodyBuffer) {
+    headers["Content-Type"] = "application/json";
     headers["Content-Length"] = String(bodyBuffer.byteLength);
   }
 

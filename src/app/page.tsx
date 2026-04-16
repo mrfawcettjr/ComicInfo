@@ -11,6 +11,9 @@ import { compressImageForUpload } from "@/lib/compress-image";
 
 const MAX_IMAGES = 4;
 
+/** Must match `src/app/api/ebay-sandbox-reset/route.ts` bodySchema. */
+const EBAY_SANDBOX_RESET_CONFIRM = "RESET_SANDBOX_CI_SKUS" as const;
+
 function isImageFile(file: File) {
   if (file.type.startsWith("image/")) {
     return true;
@@ -134,6 +137,22 @@ export default function Home() {
   const [lastSheetRowId, setLastSheetRowId] = useState<string | null>(null);
   const [ebaySandboxListingAvailable, setEbaySandboxListingAvailable] =
     useState(false);
+  const [ebaySandboxResetAvailable, setEbaySandboxResetAvailable] =
+    useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [resetConfirmDraft, setResetConfirmDraft] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetFeedback, setResetFeedback] = useState<
+    | {
+        kind: "success";
+        ciSkusFound: number;
+        skusProcessed: number;
+        offersRemoved: number;
+        errors: string[];
+      }
+    | { kind: "error"; message: string }
+    | null
+  >(null);
   const [ebayListingLoading, setEbayListingLoading] = useState(false);
   const [ebayListingFeedback, setEbayListingFeedback] = useState<
     | { kind: "success"; listingId: string; offerId: string }
@@ -166,11 +185,22 @@ export default function Home() {
     let cancelled = false;
     fetch("/api/ebay-sandbox-listing")
       .then((res) => res.json())
-      .then((data: { ebaySandboxListingAvailable?: boolean }) => {
-        if (!cancelled && data.ebaySandboxListingAvailable === true) {
-          setEbaySandboxListingAvailable(true);
-        }
-      })
+      .then(
+        (data: {
+          ebaySandboxListingAvailable?: boolean;
+          ebaySandboxResetAvailable?: boolean;
+        }) => {
+          if (cancelled) {
+            return;
+          }
+          if (data.ebaySandboxListingAvailable === true) {
+            setEbaySandboxListingAvailable(true);
+          }
+          if (data.ebaySandboxResetAvailable === true) {
+            setEbaySandboxResetAvailable(true);
+          }
+        },
+      )
       .catch(() => {
         /* ignore */
       });
@@ -533,6 +563,68 @@ export default function Home() {
     }
   }
 
+  async function runSandboxReset() {
+    setResetLoading(true);
+    setResetFeedback(null);
+    try {
+      const response = await fetch("/api/ebay-sandbox-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: EBAY_SANDBOX_RESET_CONFIRM }),
+      });
+
+      const text = await response.text();
+      let payload: unknown;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(
+          response.ok
+            ? "Invalid response from sandbox reset."
+            : `Sandbox reset failed (${response.status}).`,
+        );
+      }
+
+      const body = payload as {
+        ok?: boolean;
+        error?: string;
+        ciSkusFound?: number;
+        skusProcessed?: number;
+        offersRemoved?: number;
+        errors?: unknown;
+      };
+
+      if (!response.ok) {
+        throw new Error(body.error ?? `Sandbox reset failed (${response.status}).`);
+      }
+
+      if (body.ok !== true) {
+        throw new Error("Unexpected response from sandbox reset.");
+      }
+
+      const errList = Array.isArray(body.errors)
+        ? body.errors.filter((e): e is string => typeof e === "string")
+        : [];
+
+      setResetFeedback({
+        kind: "success",
+        ciSkusFound: body.ciSkusFound ?? 0,
+        skusProcessed: body.skusProcessed ?? 0,
+        offersRemoved: body.offersRemoved ?? 0,
+        errors: errList,
+      });
+      setResetConfirmDraft("");
+    } catch (resetErr) {
+      setResetFeedback({
+        kind: "error",
+        message:
+          resetErr instanceof Error ? resetErr.message : "Sandbox reset failed.",
+      });
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:px-8">
       <section className="space-y-2">
@@ -551,6 +643,33 @@ export default function Home() {
           not HTML scraping). Do not upload sensitive images.
         </p>
       </section>
+
+      {ebaySandboxResetAvailable ? (
+        <section
+          className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/80 dark:bg-amber-950/25"
+          aria-label="eBay sandbox tools"
+        >
+          <h2 className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+            eBay sandbox (developer)
+          </h2>
+          <p className="text-xs text-amber-900/80 dark:text-amber-200/90">
+            Remove inventory items whose SKUs match ComicInfo&apos;s pattern only (
+            <span className="font-mono">CI</span> + letters/digits, 3–50 chars). Other sandbox SKUs
+            are left untouched.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setResetModalOpen(true);
+              setResetConfirmDraft("");
+              setResetFeedback(null);
+            }}
+            className="cursor-pointer rounded border border-amber-700 bg-white px-3 py-1.5 text-sm text-amber-950 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-100 dark:hover:bg-amber-900"
+          >
+            Reset Sandbox (CI SKUs only)…
+          </button>
+        </section>
+      ) : null}
 
       <section
         className="flex min-h-[220px] flex-col gap-4 rounded-xl border-2 border-dashed border-zinc-300 p-6 transition hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500"
@@ -986,6 +1105,107 @@ export default function Home() {
           )}
         </section>
       )}
+
+      {resetModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="presentation"
+          onClick={() => {
+            if (!resetLoading) {
+              setResetModalOpen(false);
+            }
+          }}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-600 dark:bg-zinc-900"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sandbox-reset-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="sandbox-reset-title"
+              className="text-lg font-semibold text-zinc-900 dark:text-zinc-100"
+            >
+              Reset sandbox (CI SKUs only)
+            </h2>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+              This calls the eBay <strong className="font-medium">sandbox</strong> Inventory API and
+              deletes inventory items whose SKUs match ComicInfo&apos;s pattern (
+              <span className="font-mono">CI…</span>, 3–50 characters, letters and digits after{" "}
+              <span className="font-mono">CI</span>). Offers for those SKUs are withdrawn and
+              removed first. Other sandbox inventory is not touched.
+            </p>
+            <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
+              Type{" "}
+              <span className="rounded bg-zinc-100 px-1 font-mono text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100">
+                {EBAY_SANDBOX_RESET_CONFIRM}
+              </span>{" "}
+              to confirm.
+            </p>
+            <label className="mt-3 block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              Confirmation
+              <input
+                type="text"
+                autoComplete="off"
+                value={resetConfirmDraft}
+                onChange={(e) => setResetConfirmDraft(e.target.value)}
+                disabled={resetLoading}
+                className="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-violet-500 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+                placeholder={EBAY_SANDBOX_RESET_CONFIRM}
+              />
+            </label>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={resetLoading}
+                onClick={() => setResetModalOpen(false)}
+                className="cursor-pointer rounded border border-zinc-300 bg-white px-4 py-2 text-sm hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  resetLoading || resetConfirmDraft !== EBAY_SANDBOX_RESET_CONFIRM
+                }
+                onClick={runSandboxReset}
+                className="cursor-pointer rounded border border-red-700 bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-red-700 dark:hover:bg-red-600"
+              >
+                {resetLoading ? "Wiping…" : "Wipe CI SKUs"}
+              </button>
+            </div>
+            {resetFeedback?.kind === "success" ? (
+              <div
+                className="mt-4 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                role="status"
+              >
+                <p>
+                  Done. CI SKUs found: {resetFeedback.ciSkusFound}, processed:{" "}
+                  {resetFeedback.skusProcessed}, offers removed: {resetFeedback.offersRemoved}.
+                </p>
+                {resetFeedback.errors.length > 0 ? (
+                  <ul className="mt-2 list-inside list-disc text-xs">
+                    {resetFeedback.errors.map((line, i) => (
+                      <li key={i} className="font-mono">
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+            {resetFeedback?.kind === "error" ? (
+              <p
+                className="mt-4 text-sm text-amber-800 dark:text-amber-200"
+                role="alert"
+              >
+                {resetFeedback.message}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
