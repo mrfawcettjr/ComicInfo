@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 import {
-  createSandboxSevenDayAuctionFromSheetRow,
-  isEbaySandboxListingConfigured,
-} from "@/lib/ebay-sandbox";
+  createSevenDayAuctionFromSheetRow,
+  getEbayPublishCheckpointTokenHint,
+  isEbayListingConfigured,
+  isEbayPublishCheckpointPassed,
+} from "@/lib/ebay";
 import {
   findComicInfoRowNumberByRowId,
   getComicInfoSheetRow,
@@ -15,29 +17,26 @@ export const runtime = "nodejs";
 
 const bodySchema = z.object({
   rowId: z.string().min(1),
+  confirmPublishToken: z.string().min(1),
 });
 
 export async function GET() {
-  const configured = isEbaySandboxListingConfigured();
+  const configured = isEbayListingConfigured();
   return Response.json({
-    ebaySandboxListingAvailable: configured,
-    ebaySandboxResetAvailable: configured,
+    ebayListingAvailable: configured,
+    ebayPublishCheckpointHint: getEbayPublishCheckpointTokenHint(),
   });
 }
 
 export async function POST(request: Request) {
   if (!isGoogleSheetsExportConfigured()) {
-    return Response.json(
-      { error: "Google Sheets is not configured on the server." },
-      { status: 503 },
-    );
+    return Response.json({ error: "Google Sheets is not configured on the server." }, { status: 503 });
   }
-
-  if (!isEbaySandboxListingConfigured()) {
+  if (!isEbayListingConfigured()) {
     return Response.json(
       {
         error:
-          "eBay sandbox listing is not configured. Set EBAY_SANDBOX_CLIENT_ID, EBAY_SANDBOX_CLIENT_SECRET, EBAY_SANDBOX_REFRESH_TOKEN, and the three sandbox policy IDs.",
+          "eBay production listing is not configured. Set EBAY_PROD_CLIENT_ID, EBAY_PROD_CLIENT_SECRET, EBAY_PROD_REFRESH_TOKEN, and the three production policy IDs.",
       },
       { status: 503 },
     );
@@ -49,13 +48,23 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
   }
-
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return Response.json({ error: "Request body must include { rowId }." }, { status: 400 });
+    return Response.json(
+      { error: "Request body must include { rowId, confirmPublishToken }." },
+      { status: 400 },
+    );
   }
 
-  const { rowId } = parsed.data;
+  const { rowId, confirmPublishToken } = parsed.data;
+  if (!isEbayPublishCheckpointPassed(confirmPublishToken)) {
+    return Response.json(
+      {
+        error: `Publish checkpoint failed. Type ${getEbayPublishCheckpointTokenHint()} to confirm.`,
+      },
+      { status: 400 },
+    );
+  }
 
   try {
     const rowNumber = await findComicInfoRowNumberByRowId(rowId);
@@ -65,25 +74,21 @@ export async function POST(request: Request) {
         { status: 404 },
       );
     }
-
     const row = await getComicInfoSheetRow(rowNumber);
     if (!row) {
       return Response.json({ error: "Could not read that sheet row." }, { status: 404 });
     }
 
-    const result = await createSandboxSevenDayAuctionFromSheetRow(row);
-
-    const now = new Date().toISOString();
+    const result = await createSevenDayAuctionFromSheetRow(row);
     await updateComicInfoSheetRowPartial(rowNumber, {
-      pipeline_status: "ebay_sandbox_listed",
+      pipeline_status: "ebay_prod_listed",
       last_error: "",
       ebay_offer_id: result.offerId,
       ebay_listing_id: result.listingId,
       ebay_sku: result.sku,
       photo_urls: result.imageUrls.join(" | "),
-      updated_at: now,
+      updated_at: new Date().toISOString(),
     });
-
     return Response.json({
       ok: true,
       offerId: result.offerId,
@@ -91,13 +96,12 @@ export async function POST(request: Request) {
       sku: result.sku,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "eBay sandbox listing failed.";
-
+    const message = err instanceof Error ? err.message : "eBay production listing failed.";
     try {
       const rowNumber = await findComicInfoRowNumberByRowId(rowId);
       if (rowNumber !== null) {
         await updateComicInfoSheetRowPartial(rowNumber, {
-          pipeline_status: "ebay_sandbox_error",
+          pipeline_status: "ebay_prod_error",
           last_error: message.slice(0, 5000),
           updated_at: new Date().toISOString(),
         });
@@ -105,7 +109,6 @@ export async function POST(request: Request) {
     } catch {
       /* best-effort sheet update */
     }
-
     return Response.json({ error: message }, { status: 502 });
   }
 }
